@@ -146,8 +146,33 @@ function toNumberIfPossible(v) {
   return Number.isFinite(n) ? n : v;
 }
 
+/* ---------------- 延遲載入大型函式庫（加快首次進入頁面速度） ---------------- */
+const _loadedScripts = {};
+function loadScriptOnce(url) {
+  if (_loadedScripts[url]) return _loadedScripts[url];
+  _loadedScripts[url] = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = url;
+    s.onload = () => resolve();
+    s.onerror = () => { delete _loadedScripts[url]; reject(new Error('資源載入失敗：' + url)); };
+    document.head.appendChild(s);
+  });
+  return _loadedScripts[url];
+}
+function ensureXLSX() {
+  if (typeof XLSX !== 'undefined') return Promise.resolve();
+  return loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+}
+function ensureExcelJS() {
+  return Promise.all([
+    typeof ExcelJS !== 'undefined' ? Promise.resolve() : loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'),
+    typeof saveAs !== 'undefined' ? Promise.resolve() : loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js')
+  ]);
+}
+
 /* ---------------- 讀取 Excel 檔為原始二維陣列 ---------------- */
-function readWorkbookRaw(file) {
+async function readWorkbookRaw(file) {
+  await ensureXLSX();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = e => {
@@ -233,6 +258,16 @@ function renderTable() {
   }).join('');
 }
 
+// 用單一客戶物件更新本地狀態並重繪，避免每次操作都要整份清單往返
+function upsertCustomer(customer) {
+  if (!customer) return;
+  const idx = state.customers.findIndex(c => c.code === customer.code);
+  if (idx === -1) state.customers.push(customer);
+  else state.customers[idx] = customer;
+  renderTable();
+  renderStats();
+}
+
 document.getElementById('custTbody').addEventListener('click', e => {
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
@@ -251,8 +286,7 @@ async function unexportCustomer(customer) {
   try {
     const res = await apiPost('resetExportStatus', { code: customer.code });
     if (!res.ok) throw new Error(res.error || '更新失敗');
-    state.customers = res.customers;
-    renderTable(); renderStats();
+    upsertCustomer(res.customer);
     toast('ok', `已清除 ${customer.code} 的匯出紀錄`);
   } catch (err) { toast('err', err.message); }
   finally { setLoading(false); }
@@ -310,8 +344,7 @@ document.getElementById('btnSaveCustomer').addEventListener('click', async () =>
       }
     });
     if (!res.ok) throw new Error(res.error || '儲存失敗');
-    state.customers = res.customers;
-    renderTable(); renderStats();
+    upsertCustomer(res.customer);
     closeModal('ovCustomer');
     toast('ok', '客戶資料已儲存');
   } catch (err) { toast('err', err.message); }
@@ -356,6 +389,7 @@ setupDropzone('batchDropzone', 'batchFileInput', async file => {
 });
 
 document.getElementById('btnBatchImport').addEventListener('click', () => {
+  ensureXLSX(); // 提前背景載入，讓使用者選檔案時已經準備好
   batchParsed = [];
   document.getElementById('batchPreviewWrap').style.display = 'none';
   document.getElementById('batchFileInput').value = '';
@@ -394,6 +428,8 @@ function openWizard(customer) {
   document.getElementById('wizSaveMapping').checked = true;
   goToWizStep(1);
   openModal('ovWizard');
+  ensureXLSX(); // 提前背景載入解析用函式庫
+  ensureExcelJS(); // 提前背景載入匯出用函式庫，避免到第3步才等待下載
 }
 
 function goToWizStep(n) {
@@ -606,11 +642,9 @@ async function saveMappingForCustomer() {
   try {
     const mapping = { dataStartRowIdx: state.wizard.dataStartRowIdx, columnMap: state.wizard.columnMap };
     const res = await apiPost('saveMapping', { code: state.wizard.customer.code, mapping });
-    if (res.ok) {
-      state.customers = res.customers;
-      const updated = state.customers.find(c => c.code === state.wizard.customer.code);
-      if (updated) state.wizard.customer = updated;
-      renderTable();
+    if (res.ok && res.customer) {
+      state.wizard.customer = res.customer;
+      upsertCustomer(res.customer);
     }
   } catch (err) { /* 靜默失敗，不影響匯出流程 */ }
 }
@@ -674,14 +708,15 @@ async function exportWorkbook(customer, records) {
 document.getElementById('wizExport').addEventListener('click', async () => {
   const { customer, convertedRecords } = state.wizard;
   if (!convertedRecords.length) return;
-  setLoading(true, '產生匯出檔案…');
+  setLoading(true, '準備匯出元件…');
   try {
+    await ensureExcelJS();
+    setLoading(true, '產生匯出檔案…');
     const outName = await exportWorkbook(customer, convertedRecords);
     setLoading(true, '更新匯出狀態…');
     const res = await apiPost('markExported', { code: customer.code, fileName: outName, itemCount: convertedRecords.length });
     if (!res.ok) throw new Error(res.error || '更新狀態失敗');
-    state.customers = res.customers;
-    renderTable(); renderStats();
+    upsertCustomer(res.customer);
     closeModal('ovWizard');
     toast('ok', `已匯出 ${customer.code}，共 ${convertedRecords.length} 項，並標示為已匯出`);
   } catch (err) { toast('err', err.message); }
@@ -690,4 +725,7 @@ document.getElementById('wizExport').addEventListener('click', async () => {
 
 /* ---------------- 初始化 ---------------- */
 loadCustomers(true);
-setInterval(() => loadCustomers(false), 25000);
+let pollTimer = setInterval(() => { if (!document.hidden) loadCustomers(false); }, 25000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) loadCustomers(false); // 回到分頁時立即補一次，不用等下一輪
+});
