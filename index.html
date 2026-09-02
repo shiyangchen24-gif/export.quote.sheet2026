@@ -275,8 +275,9 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
     </div>
     <div class="stat-row">
       <div class="stat-chip"><span class="n mono" id="statTotal">0</span><span class="l">客戶數</span></div>
-      <div class="stat-chip pending"><span class="n mono" id="statPending">0</span><span class="l">待匯出</span></div>
-      <div class="stat-chip done"><span class="n mono" id="statDone">0</span><span class="l">已匯出</span></div>
+      <div class="stat-chip pending"><span class="n mono" id="statPending">0</span><span class="l">尚未匯出過</span></div>
+      <div class="stat-chip" id="statOverdueChip" style="border-color:var(--rust-600);"><span class="n mono" id="statOverdue" style="color:var(--rust-600);">0</span><span class="l">已到期未匯出</span></div>
+      <div class="stat-chip done"><span class="n mono" id="statDone">0</span><span class="l">匯出中（有效期內）</span></div>
     </div>
   </div>
 
@@ -286,8 +287,9 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
     </div>
     <div class="seg" id="statusFilter">
       <button class="active" data-v="all">全部</button>
-      <button data-v="pending">待匯出</button>
-      <button data-v="done">已匯出</button>
+      <button data-v="overdue">已到期未匯出</button>
+      <button data-v="never">尚未匯出過</button>
+      <button data-v="active">有效期內</button>
     </div>
     <button class="btn" id="btnResetAll">重置本期匯出狀態</button>
     <button class="btn" id="btnBatchImport">批次匯入客戶</button>
@@ -300,9 +302,8 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
         <tr>
           <th style="width:110px;">客戶代號</th>
           <th>客戶名稱</th>
-          <th style="width:90px;">狀態</th>
-          <th style="width:96px;">匯出狀態</th>
-          <th style="width:150px;">最後匯出時間</th>
+          <th style="width:90px;">報價種類</th>
+          <th style="width:170px;">匯出狀態／到期日</th>
           <th style="width:110px;">欄位範本</th>
           <th style="width:230px;text-align:right;">操作</th>
         </tr>
@@ -340,8 +341,14 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
       </div>
       <div class="field-row">
         <div class="field">
-          <label>狀態</label>
-          <select id="custStatus"><option>啟用</option><option>停用</option></select>
+          <label>報價種類</label>
+          <select id="custQuoteType">
+            <option value="7天">7天</option>
+            <option value="10天">10天</option>
+            <option value="15天">15天</option>
+            <option value="30天">30天</option>
+          </select>
+          <div class="hint">從最近一次匯出日起算，到期日 = 匯出日 + 天數</div>
         </div>
         <div class="field">
           <label>交易狀態</label>
