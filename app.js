@@ -28,9 +28,43 @@ let state = {
 };
 
 /* ---------------- API ---------------- */
+// GET 一律走 JSONP：跨網域（GitHub Pages → Apps Script）直接用 fetch 讀取
+// 在部分瀏覽器/行動裝置環境下會卡住不回應，改用 <script> 標籤讀取可穩定繞過。
+function jsonp(url, params) {
+  return new Promise((resolve, reject) => {
+    const cbName = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+    const qs = new URLSearchParams(Object.assign({}, params || {}, { callback: cbName })).toString();
+    const script = document.createElement('script');
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      cleanup();
+      reject(new Error('連線逾時，請確認 GAS_URL 是否正確、部署存取權限是否為「任何人」'));
+    }, 15000);
+    function cleanup() {
+      clearTimeout(timer);
+      delete window[cbName];
+      script.remove();
+    }
+    window[cbName] = data => {
+      if (done) return;
+      done = true;
+      cleanup();
+      resolve(data);
+    };
+    script.onerror = () => {
+      if (done) return;
+      done = true;
+      cleanup();
+      reject(new Error('無法連線到後端服務，請確認 GAS_URL 是否正確'));
+    };
+    script.src = url + '?' + qs;
+    document.body.appendChild(script);
+  });
+}
 function apiGet(action, params) {
-  const qs = new URLSearchParams(Object.assign({ action }, params || {})).toString();
-  return fetch(GAS_URL + '?' + qs).then(r => r.json());
+  return jsonp(GAS_URL, Object.assign({ action }, params || {}));
 }
 function apiPost(action, payload) {
   const body = Object.assign({ action }, payload || {});
@@ -549,11 +583,18 @@ async function saveMappingForCustomer() {
 async function exportWorkbook(customer, records) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('匯入格式');
-  ws.addRow(OUTPUT_HEADERS);
-  ws.getRow(1).eachCell(c => {
-    c.font = { bold: true, name: '微軟正黑體', size: 11, color: { argb: 'FF26291F' } };
-    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFECDD' } };
+  const FONT_NAME = '微軟正黑體';
+  const FONT_SIZE = 11;
+  const THIN = { style: 'thin', color: { argb: 'FF000000' } };
+  const BORDER = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+
+  const headerRow = ws.addRow(OUTPUT_HEADERS);
+  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    cell.font = { name: FONT_NAME, size: FONT_SIZE };
+    cell.border = BORDER;
+    cell.alignment = { vertical: 'middle', horizontal: colNumber === 3 ? 'left' : undefined };
   });
+
   const widths = [12, 16, 12, 26, 14, 10, 16, 14, 14, 14, 10, 14, 14];
   ws.columns = widths.map(w => ({ width: w }));
 
@@ -575,12 +616,16 @@ async function exportWorkbook(customer, records) {
       rec['變價原因'] || ''
     ]);
     row.getCell(3).numFmt = '@';
-    if (rec._noQuote) {
-      row.eachCell({ includeEmpty: true }, cell => {
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      cell.font = rec._noQuote
+        ? { name: FONT_NAME, size: FONT_SIZE, color: { argb: 'FFA5432C' } }
+        : { name: FONT_NAME, size: FONT_SIZE };
+      cell.border = BORDER;
+      cell.alignment = { vertical: 'middle', horizontal: colNumber === 3 ? 'left' : undefined };
+      if (rec._noQuote) {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE8B2' } };
-        cell.font = { color: { argb: 'FFA5432C' } };
-      });
-    }
+      }
+    });
   });
 
   const buf = await wb.xlsx.writeBuffer();
