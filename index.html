@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>報價單匯出系統｜忠欣蔬果</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<style>
+  :root{
+    --bg:#FAFAF8;
+    --surface:#FFFFFF;
+    --ink:#1C1B1A;
+    --ink-soft:#5B5955;
+    --ink-faint:#9A9791;
+    --border:#E4E1DA;
+    --border-strong:#CFCBC2;
+    --accent:#3F6B4A;
+    --accent-dark:#2E5038;
+    --accent-soft:#EAF1EA;
+    --warn-bg:#FFEB99;
+    --warn-text:#B3261E;
+    --danger:#C0392B;
+    --sans:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:var(--sans);
+    background:var(--bg);
+    color:var(--ink);
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent-dark);}
+
+  /* ---------- 版面 ---------- */
+  .topbar{
+    position:sticky; top:0; z-index:50;
+    background:var(--surface);
+    border-bottom:1px solid var(--border);
+    padding:14px 28px;
+    display:flex; align-items:center; justify-content:space-between;
+    gap:16px;
+  }
+  .brand{display:flex; align-items:baseline; gap:10px;}
+  .brand .mark{
+    width:10px;height:10px;border-radius:2px;background:var(--accent);
+    display:inline-block; transform:rotate(45deg);
+  }
+  .brand h1{font-size:16px; font-weight:700; margin:0; letter-spacing:.01em;}
+  .brand .sub{font-size:12px; color:var(--ink-faint); font-family:var(--mono);}
+  .conn-status{font-size:12px; font-family:var(--mono); display:flex; align-items:center; gap:6px; color:var(--ink-soft);}
+  .conn-dot{width:7px;height:7px;border-radius:50%; background:var(--ink-faint);}
+  .conn-dot.ok{background:var(--accent);}
+  .conn-dot.err{background:var(--danger);}
+
+  .shell{max-width:1180px; margin:0 auto; padding:32px 28px 80px;}
+
+  .view{display:none;}
+  .view.active{display:block;}
+
+  /* ---------- 卡片 / 表格 ---------- */
+  .panel-head{display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:18px; flex-wrap:wrap;}
+  .panel-head h2{font-size:20px; margin:0 0 4px;}
+  .panel-head p{margin:0; color:var(--ink-soft); font-size:13.5px;}
+
+  .toolbar{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+  input[type=text], input[type=search]{
+    font-family:var(--sans); font-size:13.5px;
+    border:1px solid var(--border-strong); border-radius:6px;
+    padding:8px 12px; background:var(--surface); color:var(--ink);
+  }
+  input[type=text]:focus, input[type=search]:focus, select:focus{outline:2px solid var(--accent); outline-offset:1px;}
+
+  .btn{
+    font-family:var(--sans); font-size:13.5px; font-weight:600;
+    border-radius:6px; border:1px solid var(--border-strong);
+    background:var(--surface); color:var(--ink);
+    padding:8px 14px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+    transition:border-color .12s, background .12s;
+  }
+  .btn:hover{border-color:var(--ink-soft);}
+  .btn:focus-visible{outline:2px solid var(--accent); outline-offset:1px;}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff;}
+  .btn.primary:hover{background:var(--accent-dark); border-color:var(--accent-dark);}
+  .btn.ghost{background:transparent; border-color:transparent; color:var(--ink-soft);}
+  .btn.ghost:hover{color:var(--ink); background:var(--accent-soft);}
+  .btn.small{padding:5px 10px; font-size:12.5px;}
+  .btn:disabled{opacity:.45; cursor:not-allowed;}
+  .btn.danger-text{color:var(--danger);}
+
+  table{width:100%; border-collapse:collapse; font-size:13.5px;}
+  .data-table{background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;}
+  .data-table thead th{
+    text-align:left; font-weight:600; color:var(--ink-soft); font-size:12px;
+    padding:10px 14px; border-bottom:1px solid var(--border); background:#FCFCFB;
+  }
+  .data-table tbody td{padding:11px 14px; border-bottom:1px solid var(--border); vertical-align:middle;}
+  .data-table tbody tr:last-child td{border-bottom:none;}
+  .data-table tbody tr:hover{background:#FBFBF9;}
+  .code-cell{font-family:var(--mono); font-weight:600; color:var(--ink);}
+
+  .badge{display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; padding:3px 9px; border-radius:20px;}
+  .badge.done{background:var(--accent-soft); color:var(--accent-dark);}
+  .badge.pending{background:#F1F0EC; color:var(--ink-faint);}
+  .badge .dot{width:6px;height:6px;border-radius:50%; background:currentColor;}
+
+  .empty{padding:48px 20px; text-align:center; color:var(--ink-faint);}
+  .empty strong{display:block; color:var(--ink-soft); font-size:14px; margin-bottom:4px; font-weight:600;}
+
+  /* ---------- Modal ---------- */
+  .overlay{
+    position:fixed; inset:0; background:rgba(28,27,26,.4);
+    display:none; align-items:center; justify-content:center; z-index:100; padding:20px;
+  }
+  .overlay.active{display:flex;}
+  .modal{
+    background:var(--surface); border-radius:12px; padding:24px; width:100%; max-width:420px;
+    box-shadow:0 20px 50px rgba(0,0,0,.18);
+  }
+  .modal h3{margin:0 0 14px; font-size:16px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block; font-size:12.5px; font-weight:600; color:var(--ink-soft); margin-bottom:5px;}
+  .field input[type=text]{width:100%;}
+  .modal-actions{display:flex; justify-content:flex-end; gap:8px; margin-top:18px;}
+
+  /* ---------- 匯入精靈 ---------- */
+  .wizard-head{display:flex; align-items:center; gap:10px; margin-bottom:22px;}
+  .wizard-head .back{cursor:pointer; color:var(--ink-faint); font-size:13px;}
+  .wizard-head .back:hover{color:var(--ink);}
+  .wizard-cust{font-family:var(--mono); font-size:13px; color:var(--ink-soft);}
+
+  .steps{display:flex; gap:0; margin-bottom:26px; border-bottom:1px solid var(--border);}
+  .step-tab{
+    padding:10px 4px; margin-right:26px; font-size:13px; font-weight:600; color:var(--ink-faint);
+    border-bottom:2px solid transparent; cursor:default; display:flex; align-items:center; gap:7px;
+  }
+  .step-tab .n{
+    width:18px;height:18px;border-radius:50%; background:#F1F0EC; color:var(--ink-faint);
+    font-size:11px; display:flex; align-items:center; justify-content:center; font-family:var(--mono);
+  }
+  .step-tab.active{color:var(--ink); border-color:var(--accent);}
+  .step-tab.active .n{background:var(--accent); color:#fff;}
+  .step-tab.done .n{background:var(--accent-soft); color:var(--accent-dark);}
+
+  .step-pane{display:none;}
+  .step-pane.active{display:block;}
+
+  .dropzone{
+    border:1.5px dashed var(--border-strong); border-radius:10px; padding:44px 20px;
+    text-align:center; color:var(--ink-soft); cursor:pointer; background:var(--surface);
+    transition:border-color .12s, background .12s;
+  }
+  .dropzone:hover, .dropzone.drag{border-color:var(--accent); background:var(--accent-soft);}
+  .dropzone strong{display:block; color:var(--ink); font-size:14.5px; margin-bottom:6px;}
+  .dropzone .hint{font-size:12px; color:var(--ink-faint); margin-top:8px;}
+
+  .sheet-select{display:flex; align-items:center; gap:10px; margin:16px 0; font-size:13px;}
+  select{font-family:var(--sans); font-size:13.5px; padding:7px 10px; border-radius:6px; border:1px solid var(--border-strong); background:var(--surface);}
+
+  .raw-panel{border:1px solid var(--border); border-radius:10px; background:var(--surface); overflow:hidden;}
+  .raw-panel-head{display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid var(--border); background:#FCFCFB;}
+  .raw-panel-head .title{font-size:12.5px; font-weight:600; color:var(--ink-soft);}
+  .raw-scroll{max-height:340px; overflow:auto;}
+  .raw-table{border-collapse:collapse; font-size:12.5px; font-family:var(--mono); width:max-content; min-width:100%;}
+  .raw-table td, .raw-table th{border:1px solid var(--border); padding:5px 9px; white-space:nowrap; max-width:260px; overflow:hidden; text-overflow:ellipsis;}
+  .raw-table th{background:#FCFCFB; color:var(--ink-faint); position:sticky; top:0; font-weight:600;}
+  .raw-table td.rownum{background:#FCFCFB; color:var(--ink-faint); text-align:center; position:sticky; left:0;}
+  .raw-table tr.header-row td{background:var(--accent-soft);}
+  .raw-table tr.clickable td:not(.rownum):hover{background:#F1F0EC; cursor:pointer;}
+  .raw-table td.picking{cursor:crosshair;}
+  .raw-table td.picking:hover{background:var(--warn-bg) !important; cursor:crosshair;}
+  .row-flag{font-family:var(--sans); font-size:11px; color:var(--accent-dark); font-weight:600; white-space:nowrap;}
+
+  .mapping-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:12px; margin-top:18px;}
+  .map-field{border:1px solid var(--border); border-radius:10px; padding:13px 14px; background:var(--surface);}
+  .map-field.required{border-color:#DCCFAF; background:#FFFDF6;}
+  .map-field .label{font-size:12.5px; font-weight:600; margin-bottom:8px; display:flex; align-items:center; gap:6px;}
+  .map-field .req-star{color:var(--warn-text);}
+  .map-field .mode-row{display:flex; gap:6px; margin-bottom:8px;}
+  .mode-btn{font-size:11px; padding:3px 8px; border-radius:20px; border:1px solid var(--border-strong); background:var(--surface); cursor:pointer; color:var(--ink-soft);}
+  .mode-btn.active{background:var(--ink); color:#fff; border-color:var(--ink);}
+  .map-field select, .map-field input[type=text]{width:100%;}
+  .pick-btn{width:100%; margin-top:6px;}
+  .pick-btn.picking{background:var(--warn-bg); border-color:var(--warn-text); color:var(--warn-text);}
+
+  .preview-summary{display:flex; gap:22px; margin:6px 0 16px; flex-wrap:wrap;}
+  .stat{font-size:13px; color:var(--ink-soft);}
+  .stat b{font-family:var(--mono); color:var(--ink); font-size:15px; margin-right:4px;}
+  .stat.warn b{color:var(--warn-text);}
+
+  .preview-table-wrap{border:1px solid var(--border); border-radius:10px; overflow:auto; max-height:460px; background:var(--surface);}
+  .preview-table{border-collapse:collapse; font-size:12.5px; width:max-content; min-width:100%;}
+  .preview-table th, .preview-table td{border-bottom:1px solid var(--border); border-right:1px solid var(--border); padding:7px 10px; white-space:nowrap;}
+  .preview-table th{background:#FCFCFB; position:sticky; top:0; color:var(--ink-soft); font-weight:600; text-align:left; font-size:11.5px;}
+  .preview-table tr.noquote td{background:var(--warn-bg); color:var(--warn-text); font-weight:600;}
+  .preview-table tr.excluded td{opacity:.35; text-decoration:line-through;}
+  .preview-table td.chk{text-align:center;}
+
+  .step-actions{display:flex; justify-content:space-between; margin-top:24px;}
+  .step-actions .right{display:flex; gap:8px;}
+
+  .save-mapping-row{display:flex; align-items:center; gap:8px; margin-top:16px; font-size:13px; color:var(--ink-soft);}
+
+  .toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+    background:var(--ink); color:#fff; padding:11px 18px; border-radius:8px;
+    font-size:13.5px; z-index:200; box-shadow:0 10px 30px rgba(0,0,0,.25);
+    opacity:0; pointer-events:none; transition:opacity .2s, transform .2s;
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(-4px);}
+  .toast.err{background:var(--danger);}
+
+  .kbd-hint{font-family:var(--mono); font-size:11px; color:var(--ink-faint); background:#F1F0EC; padding:1px 6px; border-radius:4px;}
+  .footer-note{margin-top:40px; font-size:12px; color:var(--ink-faint); text-align:center;}
+
+  @media (max-width:720px){
+    .shell{padding:20px 14px 60px;}
+    .topbar{padding:12px 16px;}
+    .mapping-grid{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <span class="mark"></span>
+    <h1>報價單匯出系統</h1>
+    <span class="sub">忠欣蔬果</span>
+  </div>
+  <div class="conn-status">
+    <span class="conn-dot" id="connDot"></span>
+    <span id="connText">連線中…</span>
+  </div>
+</div>
+
+<div class="shell">
+
+  <!-- ============ 客戶總覽 ============ -->
+  <div class="view active" id="viewDashboard">
+    <div class="panel-head">
+      <div>
+        <h2>客戶總覽</h2>
+        <p>每個廠商 / 客戶的報價單匯出狀態，點「上傳報價單」開始匯入。</p>
+      </div>
+      <div class="toolbar">
+        <input type="search" id="searchInput" placeholder="搜尋客戶代號或名稱">
+        <button class="btn primary" id="btnAddCustomer">＋ 新增客戶</button>
+      </div>
+    </div>
+
+    <div class="data-table" id="customerTableWrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:120px">客戶代號</th>
+            <th>客戶名稱</th>
+            <th style="width:150px">匯出狀態</th>
+            <th style="width:150px">最新匯出時間</th>
+            <th style="width:90px">筆數</th>
+            <th style="width:230px">操作</th>
+          </tr>
+        </thead>
+        <tbody id="customerTbody"></tbody>
+      </table>
+      <div class="empty" id="customerEmpty" style="display:none;">
+        <strong>還沒有任何客戶</strong>
+        點「＋ 新增客戶」建立第一筆，或直接上傳報價單自動建立。
+      </div>
+    </div>
+
+    <div class="footer-note">資料同步自雲端試算表，任何裝置開啟這個網址都會看到相同狀態。</div>
+  </div>
+
+  <!-- ============ 匯入精靈 ============ -->
+  <div class="view" id="viewWizard">
+    <div class="wizard-head">
+      <span class="back" id="btnBack">← 返回客戶總覽</span>
+      <span class="wizard-cust" id="wizardCustLabel"></span>
+    </div>
+
+    <div class="steps">
+      <div class="step-tab" data-step="1"><span class="n">1</span>上傳檔案</div>
+      <div class="step-tab" data-step="2"><span class="n">2</span>標題列 &amp; 欄位對應</div>
+      <div class="step-tab" data-step="3"><span class="n">3</span>預覽確認</div>
+      <div class="step-tab" data-step="4"><span class="n">4</span>完成匯出</div>
+    </div>
+
+    <!-- Step 1: 上傳 -->
+    <div class="step-pane" id="pane1">
+      <div class="dropzone" id="dropzone">
+        <strong>拖曳檔案到這裡，或點擊選擇檔案</strong>
+        支援 .xls / .xlsx 客戶原始報價單
+        <div class="hint">檔案不會離開你的瀏覽器，直到你按下「確認匯出」才會上傳存檔</div>
+      </div>
+      <input type="file" id="fileInput" accept=".xls,.xlsx" style="display:none;">
+      <div class="sheet-select" id="sheetSelectRow" style="display:none;">
+        <label>選擇工作表：</label>
+        <select id="sheetSelect"></select>
+      </div>
+    </div>
+
+    <!-- Step 2: 標題列 + 欄位對應 -->
+    <div class="step-pane" id="pane2">
+      <div class="raw-panel">
+        <div class="raw-panel-head">
+          <span class="title">原始檔案內容 — 點一列設為「標題列」；欄位對應時可點「從表格擷取」再點儲存格</span>
+          <span class="row-flag" id="headerRowFlag"></span>
+        </div>
+        <div class="raw-scroll"><table class="raw-table" id="rawTable"></table></div>
+      </div>
+
+      <div class="mapping-grid" id="mappingGrid"></div>
+
+      <div class="save-mapping-row">
+        <input type="checkbox" id="saveMappingChk" checked>
+        <label for="saveMappingChk">記住這個客戶的欄位對應，下次上傳自動套用</label>
+      </div>
+
+      <div class="step-actions">
+        <button class="btn" id="btn2Back">上一步</button>
+        <div class="right">
+          <button class="btn primary" id="btn2Next">下一步：預覽</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: 預覽 -->
+    <div class="step-pane" id="pane3">
+      <div class="preview-summary">
+        <div class="stat">已對應品項　<b id="statTotal">0</b></div>
+        <div class="stat">有報價　<b id="statQuoted">0</b></div>
+        <div class="stat warn">未報價（黃底標示）　<b id="statNoQuote">0</b></div>
+        <div class="stat">已排除　<b id="statExcluded">0</b></div>
+      </div>
+      <div class="preview-table-wrap"><table class="preview-table" id="previewTable"></table></div>
+      <div class="step-actions">
+        <button class="btn" id="btn3Back">上一步</button>
+        <div class="right">
+          <button class="btn primary" id="btn3Next">確認匯出</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4: 完成 -->
+    <div class="step-pane" id="pane4">
+      <div class="empty" id="doneBox">
+        <strong>匯出完成</strong>
+        檔案已下載，並同步記錄到雲端。
+      </div>
+      <div class="step-actions" style="justify-content:center;">
+        <button class="btn primary" id="btnDoneBack">回到客戶總覽</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- 新增客戶 Modal -->
+<div class="overlay" id="addModal">
+  <div class="modal">
+    <h3>新增客戶</h3>
+    <div class="field">
+      <label>客戶代號 *</label>
+      <input type="text" id="newCustCode" placeholder="例如 Z2353">
+    </div>
+    <div class="field">
+      <label>客戶名稱</label>
+      <input type="text" id="newCustName" placeholder="例如 嘉農農產">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="addModalCancel">取消</button>
+      <button class="btn primary" id="addModalConfirm">建立</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   CONFIG — 部署好 Google Apps Script 後，把網址貼在這裡
+   ============================================================ */
+const CONFIG = {
+  GAS_URL: 'PASTE_YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE'
+};
+
+/* 匯出目標欄位定義（對應「報價單匯入_客戶貨號報價單格式」樣板） */
+const TARGET_FIELDS = [
+  { key:'custCode',  label:'客戶代號',     required:true,  exportHeader:'*客戶代號',   constantDefault:true  },
+  { key:'custName',  label:'客戶名稱',     required:false, exportHeader:'客戶名稱',    constantDefault:true  },
+  { key:'itemCode',  label:'客戶貨號',     required:true,  exportHeader:'*客戶貨號',   constantDefault:false },
+  { key:'itemName',  label:'客戶商品名稱', required:false, exportHeader:'客戶商品名稱',constantDefault:false },
+  { key:'specUnit',  label:'客戶規格單位', required:false, exportHeader:'客戶規格單位',constantDefault:false },
+  { key:'price',     label:'單價',         required:true,  exportHeader:'*單價',       constantDefault:false },
+  { key:'remark',    label:'備註',         required:false, exportHeader:'備註',        constantDefault:false },
+  { key:'origin',    label:'產區/品種',    required:false, exportHeader:'產區/品種',   constantDefault:false },
+  { key:'packMethod',label:'裝箱方式',     required:false, exportHeader:'裝箱方式',    constantDefault:false },
+  { key:'packMat',   label:'包裝資材',     required:false, exportHeader:'包裝資材',    constantDefault:false },
+  { key:'place',     label:'產地',         required:false, exportHeader:'產地',        constantDefault:false },
+  { key:'noQuoteReason', label:'不報價原因', required:false, exportHeader:'不報價原因', constantDefault:false },
+  { key:'priceChangeReason', label:'變價原因', required:false, exportHeader:'變價原因', constantDefault:false }
+];
+
+const HEADER_KEYWORDS = ['貨號','編號','品名','商品','規格','單位','單價','價格','項次','品項','料號','代號','數量','備註','品號'];
+
+/* ============================================================
+   狀態
+   ============================================================ */
+let state = {
+  customers: [],
+  records: [],
+  currentCustomer: null,     // { code, name, mapping, ... }
+  raw: { rows: [], headerRowIdx: -1, sheetNames: [], activeSheet: '' },
+  mapping: {},                // key -> { mode:'column'|'constant', column:idx, value:'' }
+  preview: [],                // computed rows
+  pickingField: null
+};
+
+/* ============================================================
+   工具
+   ============================================================ */
+function $(sel){ return document.querySelector(sel); }
+function $all(sel){ return Array.from(document.querySelectorAll(sel)); }
+function colLetter(i){ let s=''; i++; while(i>0){ let m=(i-1)%26; s=String.fromCharCode(65+m)+s; i=Math.floor((i-1)/26); } return s; }
+function showToast(msg, isErr){
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(showToast._tm);
+  showToast._tm = setTimeout(()=> t.classList.remove('show'), 2600);
+}
+function fmtDate(iso){
+  if(!iso) return '—';
+  const d = new Date(iso);
+  if(isNaN(d)) return '—';
+  const p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function isBlank(v){
+  return v===null || v===undefined || String(v).trim()==='';
+}
+
+/* ============================================================
+   後端通訊
+   ============================================================ */
+async function callBackend(action, payload){
+  if(!CONFIG.GAS_URL || CONFIG.GAS_URL.indexOf('https://script.google.com/macros/s/AKfycbzWIIZ9VEX1RSAjJVnegzzDdmxa0kRU5oQEq4sYg43KSzXdkbLJZMW1xDj_m3vIcq_9/exec') === 0){
+    throw new Error('尚未設定 GAS_URL，請先部署 Apps Script 並填入網址');
+  }
+  const res = await fetch(CONFIG.GAS_URL, {
+    method:'POST',
+    headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+    body: JSON.stringify(Object.assign({action}, payload||{}))
+  });
+  const json = await res.json();
+  if(!json.success) throw new Error(json.error || '後端發生錯誤');
+  return json;
+}
+
+async function loadCustomers(){
+  try{
+    const res = await callBackend('list');
+    state.customers = res.customers || [];
+    state.records = res.records || [];
+    setConn(true);
+  }catch(err){
+    setConn(false, err.message);
+  }
+  renderCustomerTable();
+}
+
+function setConn(ok, msg){
+  $('#connDot').className = 'conn-dot ' + (ok ? 'ok' : 'err');
+  $('#connText').textContent = ok ? '雲端已連線' : ('離線：' + (msg||'無法連線'));
+}
+
+/* ============================================================
+   客戶總覽
+   ============================================================ */
+function renderCustomerTable(){
+  const q = ($('#searchInput').value || '').trim().toLowerCase();
+  const tbody = $('#customerTbody');
+  tbody.innerHTML = '';
+  const list = state.customers.filter(c =>
+    !q || c.code.toLowerCase().includes(q) || (c.name||'').toLowerCase().includes(q)
+  ).sort((a,b) => (b.lastExportAt||'').localeCompare(a.lastExportAt||''));
+
+  $('#customerEmpty').style.display = list.length ? 'none' : 'block';
+
+  list.forEach(c => {
+    const exported = !!c.lastExportAt;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="code-cell">${escapeHtml(c.code)}</td>
+      <td>${escapeHtml(c.name||'—')}</td>
+      <td>
+        <span class="badge ${exported?'done':'pending'}">
+          <span class="dot"></span>${exported?'已匯出':'尚未匯出'}
+        </span>
+      </td>
+      <td>${fmtDate(c.lastExportAt)}</td>
+      <td>${exported ? c.lastExportCount : '—'}</td>
+      <td>
+        <button class="btn small primary" data-action="upload" data-code="${escapeAttr(c.code)}">上傳報價單</button>
+        ${c.lastExportUrl ? `<a class="btn small ghost" href="${escapeAttr(c.lastExportUrl)}" target="_blank" rel="noopener">下載最新檔</a>` : ''}
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('[data-action="upload"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const c = state.customers.find(x=>x.code===btn.dataset.code);
+      openWizard(c);
+    });
+  });
+}
+function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function escapeAttr(s){ return escapeHtml(s); }
+
+$('#searchInput').addEventListener('input', renderCustomerTable);
+
+/* ---- 新增客戶 Modal ---- */
+$('#btnAddCustomer').addEventListener('click', ()=>{
+  $('#newCustCode').value=''; $('#newCustName').value='';
+  $('#addModal').classList.add('active');
+  $('#newCustCode').focus();
+});
+$('#addModalCancel').addEventListener('click', ()=> $('#addModal').classList.remove('active'));
+$('#addModal').addEventListener('click', e=>{ if(e.target.id==='addModal') $('#addModal').classList.remove('active'); });
+$('#addModalConfirm').addEventListener('click', async ()=>{
+  const code = $('#newCustCode').value.trim();
+  const name = $('#newCustName').value.trim();
+  if(!code){ showToast('請輸入客戶代號', true); return; }
+  try{
+    await callBackend('upsertCustomer', { code, name });
+    showToast('客戶已建立');
+    $('#addModal').classList.remove('active');
+    await loadCustomers();
+  }catch(err){ showToast(err.message, true); }
+});
+
+/* ============================================================
+   匯入精靈 — 導覽
+   ============================================================ */
+function openWizard(customer){
+  state.currentCustomer = customer || { code:'', name:'', mapping:null };
+  state.raw = { rows: [], headerRowIdx: -1, sheetNames: [], activeSheet: '', workbook:null };
+  state.mapping = buildDefaultMapping(customer && customer.mapping);
+  state.preview = [];
+  $('#wizardCustLabel').textContent = customer ? `${customer.code}　${customer.name||''}` : '新客戶';
+  $('#viewDashboard').classList.remove('active');
+  $('#viewWizard').classList.add('active');
+  goToStep(1);
+  $('#sheetSelectRow').style.display = 'none';
+  $('#fileInput').value = '';
+}
+function buildDefaultMapping(saved){
+  const m = {};
+  TARGET_FIELDS.forEach(f=>{
+    if(saved && saved[f.key]){
+      m[f.key] = saved[f.key];
+    } else if(f.key==='custCode'){
+      m[f.key] = { mode:'constant', value: (state.currentCustomer && state.currentCustomer.code) || '' };
+    } else if(f.key==='custName'){
+      m[f.key] = { mode:'constant', value: (state.currentCustomer && state.currentCustomer.name) || '' };
+    } else {
+      m[f.key] = { mode:'column', column:-1, value:'' };
+    }
+  });
+  return m;
+}
+$('#btnBack').addEventListener('click', backToDashboard);
+$('#btnDoneBack').addEventListener('click', backToDashboard);
+function backToDashboard(){
+  $('#viewWizard').classList.remove('active');
+  $('#viewDashboard').classList.add('active');
+  loadCustomers();
+}
+
+function goToStep(n){
+  $all('.step-tab').forEach(t=>{
+    const s = Number(t.dataset.step);
+    t.classList.toggle('active', s===n);
+    t.classList.toggle('done', s<n);
+  });
+  $all('.step-pane').forEach(p=> p.classList.remove('active'));
+  $('#pane'+n).classList.add('active');
+}
+
+/* ============================================================
+   Step 1 — 上傳檔案
+   ============================================================ */
+const dropzone = $('#dropzone');
+dropzone.addEventListener('click', ()=> $('#fileInput').click());
+['dragover','dragenter'].forEach(evt=> dropzone.addEventListener(evt, e=>{ e.preventDefault(); dropzone.classList.add('drag'); }));
+['dragleave','drop'].forEach(evt=> dropzone.addEventListener(evt, e=>{ e.preventDefault(); dropzone.classList.remove('drag'); }));
+dropzone.addEventListener('drop', e=>{
+  const f = e.dataTransfer.files[0];
+  if(f) handleFile(f);
+});
+$('#fileInput').addEventListener('change', e=>{
+  const f = e.target.files[0];
+  if(f) handleFile(f);
+});
+
+function handleFile(file){
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    try{
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type:'array' });
+      state.raw.workbook = wb;
+      state.raw.sheetNames = wb.SheetNames;
+      const sel = $('#sheetSelect');
+      sel.innerHTML = wb.SheetNames.map(n=>`<option value="${escapeAttr(n)}">${escapeHtml(n)}</option>`).join('');
+      $('#sheetSelectRow').style.display = wb.SheetNames.length>1 ? 'flex' : 'none';
+      loadSheet(wb.SheetNames[0]);
+      showToast('檔案已讀取：' + file.name);
+      goToStep(2);
+    }catch(err){
+      showToast('無法讀取檔案：' + err.message, true);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+$('#sheetSelect').addEventListener('change', e=> loadSheet(e.target.value));
+
+function loadSheet(sheetName){
+  const ws = state.raw.workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:false, defval:'' });
+  state.raw.activeSheet = sheetName;
+  state.raw.rows = rows;
+  state.raw.headerRowIdx = detectHeaderRow(rows);
+  autoGuessConstants(rows, state.raw.headerRowIdx);
+  autoApplySavedColumnMapping();
+  renderRawTable();
+  renderMappingGrid();
+}
+
+function detectHeaderRow(rows){
+  let best = -1, bestScore = 0;
+  const limit = Math.min(rows.length, 30);
+  for(let r=0; r<limit; r++){
+    let score = 0;
+    (rows[r]||[]).forEach(cell=>{
+      const txt = String(cell||'').trim();
+      if(!txt) return;
+      if(HEADER_KEYWORDS.some(k => txt.includes(k))) score++;
+    });
+    if(score > bestScore){ bestScore = score; best = r; }
+  }
+  return bestScore >= 2 ? best : (rows.length ? 0 : -1);
+}
+
+function autoGuessConstants(rows, headerIdx){
+  const scanLimit = Math.min(headerIdx>=0?headerIdx:rows.length, 12);
+  const patterns = [
+    { key:'custCode', re:/(廠商編號|客戶代號|廠商代號)[:：]?\s*(.+)/ },
+    { key:'custName', re:/(廠商名稱|客戶名稱|供應商名稱)[:：]?\s*(.+)/ }
+  ];
+  for(let r=0; r<scanLimit; r++){
+    const row = rows[r] || [];
+    for(let c=0; c<row.length; c++){
+      const txt = String(row[c]||'').trim();
+      patterns.forEach(p=>{
+        const m = txt.match(p.re);
+        if(m && m[2] && m[2].trim()){
+          if(state.mapping[p.key].mode==='constant' && !state.mapping[p.key].value){
+            state.mapping[p.key].value = m[2].trim();
+          }
+        } else if(txt.replace(/[:：]$/,'') === (p.key==='custCode' ? '廠商編號' : '廠商名稱') && row[c+1]){
+          if(state.mapping[p.key].mode==='constant' && !state.mapping[p.key].value){
+            state.mapping[p.key].value = String(row[c+1]).trim();
+          }
+        }
+      });
+    }
+  }
+}
+
+function autoApplySavedColumnMapping(){
+  // 若有已儲存的對應設定，欄位模式沿用；但欄位索引以目前標題列的文字重新比對，避免欄位順序不同造成錯位
+  const saved = state.currentCustomer && state.currentCustomer.mapping;
+  if(!saved) return;
+  const headerRow = state.raw.rows[state.raw.headerRowIdx] || [];
+  TARGET_FIELDS.forEach(f=>{
+    const sv = saved[f.key];
+    if(sv && sv.mode==='column' && sv.headerText){
+      const idx = headerRow.findIndex(h => String(h||'').trim() === sv.headerText);
+      if(idx > -1) state.mapping[f.key] = { mode:'column', column: idx, value:'', headerText: sv.headerText };
+    } else if(sv && sv.mode==='constant' && !state.mapping[f.key].value){
+      state.mapping[f.key] = { mode:'constant', value: sv.value };
+    }
+  });
+}
+
+/* ============================================================
+   Step 2 — 原始資料表 + 欄位對應
+   ============================================================ */
+function renderRawTable(){
+  const rows = state.raw.rows;
+  const maxCols = rows.reduce((m,r)=> Math.max(m, r.length), 0);
+  const table = $('#rawTable');
+  let html = '<thead><tr><th></th>';
+  for(let c=0;c<maxCols;c++) html += `<th>${colLetter(c)}</th>`;
+  html += '</tr></thead><tbody>';
+  const limit = Math.min(rows.length, 200);
+  for(let r=0;r<limit;r++){
+    const isHeader = r===state.raw.headerRowIdx;
+    html += `<tr class="${isHeader?'header-row':'clickable'}" data-row="${r}">`;
+    html += `<td class="rownum">${r+1}</td>`;
+    for(let c=0;c<maxCols;c++){
+      const v = (rows[r]||[])[c];
+      html += `<td data-row="${r}" data-col="${c}">${escapeHtml(v==null?'':v)}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody>';
+  table.innerHTML = html;
+  updateHeaderRowFlag();
+
+  table.querySelectorAll('tbody tr').forEach(tr=>{
+    tr.addEventListener('click', (e)=>{
+      const td = e.target.closest('td');
+      if(!td) return;
+      if(state.pickingField){
+        const val = td.dataset.col!==undefined ? (rows[Number(tr.dataset.row)]||[])[Number(td.dataset.col)] : '';
+        applyPickedValue(val);
+        return;
+      }
+      // 沒有正在挑選欄位時，點列 = 設定標題列
+      state.raw.headerRowIdx = Number(tr.dataset.row);
+      renderRawTable();
+      renderMappingGrid();
+    });
+  });
+}
+function updateHeaderRowFlag(){
+  $('#headerRowFlag').textContent = state.raw.headerRowIdx>-1 ? `目前標題列：第 ${state.raw.headerRowIdx+1} 列` : '尚未偵測到標題列，請手動點選';
+}
+
+function getHeaderOptions(){
+  const row = state.raw.rows[state.raw.headerRowIdx] || [];
+  return row.map((h,i)=> ({ idx:i, label: `${colLetter(i)}　${String(h||'').trim() || '(未命名)'}` }));
+}
+
+function renderMappingGrid(){
+  const opts = getHeaderOptions();
+  const grid = $('#mappingGrid');
+  grid.innerHTML = '';
+  TARGET_FIELDS.forEach(f=>{
+    const m = state.mapping[f.key];
+    const canConstant = true;
+    const div = document.createElement('div');
+    div.className = 'map-field' + (f.required?' required':'');
+    div.innerHTML = `
+      <div class="label">${f.label}${f.required?'<span class="req-star"> *</span>':''}</div>
+      <div class="mode-row">
+        <button type="button" class="mode-btn ${m.mode==='column'?'active':''}" data-mode="column">依欄位</button>
+        <button type="button" class="mode-btn ${m.mode==='constant'?'active':''}" data-mode="constant">固定值</button>
+      </div>
+      <div class="mode-body"></div>
+    `;
+    const body = div.querySelector('.mode-body');
+    renderModeBody(body, f, m);
+
+    div.querySelectorAll('.mode-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const mode = btn.dataset.mode;
+        state.mapping[f.key] = mode==='column'
+          ? { mode:'column', column:-1, value:'' }
+          : { mode:'constant', value: state.mapping[f.key].value || '' };
+        renderMappingGrid();
+      });
+    });
+    grid.appendChild(div);
+  });
+
+  function renderModeBody(body, f, m){
+    if(m.mode==='column'){
+      const sel = document.createElement('select');
+      sel.innerHTML = '<option value="-1">— 不使用 —</option>' +
+        opts.map(o=>`<option value="${o.idx}">${escapeHtml(o.label)}</option>`).join('');
+      sel.value = m.column ?? -1;
+      sel.addEventListener('change', ()=>{
+        const idx = Number(sel.value);
+        const headerRow = state.raw.rows[state.raw.headerRowIdx] || [];
+        state.mapping[f.key] = { mode:'column', column: idx, value:'', headerText: idx>-1 ? String(headerRow[idx]||'').trim() : '' };
+      });
+      body.appendChild(sel);
+    } else {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = '輸入固定值，或用下方按鈕從表格擷取';
+      input.value = m.value || '';
+      input.addEventListener('input', ()=>{ state.mapping[f.key].value = input.value; });
+      body.appendChild(input);
+
+      const pickBtn = document.createElement('button');
+      pickBtn.type = 'button';
+      pickBtn.className = 'btn small pick-btn';
+      pickBtn.textContent = state.pickingField===f.key ? '請在上方表格點選儲存格…' : '🎯 從表格擷取';
+      if(state.pickingField===f.key) pickBtn.classList.add('picking');
+      pickBtn.addEventListener('click', ()=>{
+        state.pickingField = state.pickingField===f.key ? null : f.key;
+        renderMappingGrid();
+        toggleRawTablePicking();
+      });
+      body.appendChild(pickBtn);
+    }
+  }
+}
+function toggleRawTablePicking(){
+  $('#rawTable').querySelectorAll('td[data-col]').forEach(td=>{
+    td.classList.toggle('picking', !!state.pickingField);
+  });
+}
+function applyPickedValue(val){
+  const key = state.pickingField;
+  if(!key) return;
+  state.mapping[key] = { mode:'constant', value: String(val==null?'':val).trim() };
+  state.pickingField = null;
+  renderMappingGrid();
+  toggleRawTablePicking();
+  showToast('已擷取數值：' + String(val));
+}
+
+$('#btn2Back').addEventListener('click', ()=> goToStep(1));
+$('#btn2Next').addEventListener('click', ()=>{
+  if(state.raw.headerRowIdx===-1){ showToast('請先設定標題列', true); return; }
+  const missing = TARGET_FIELDS.filter(f=>f.required).filter(f=>{
+    const m = state.mapping[f.key];
+    if(m.mode==='constant') return isBlank(m.value);
+    return !m.column || m.column<0;
+  });
+  if(missing.length){
+    showToast('必填欄位尚未設定：' + missing.map(f=>f.label).join('、'), true);
+    return;
+  }
+  computePreview();
+  renderPreviewTable();
+  goToStep(3);
+});
+
+/* ============================================================
+   Step 3 — 預覽
+   ============================================================ */
+function computePreview(){
+  const rows = state.raw.rows;
+  const start = state.raw.headerRowIdx + 1;
+  const itemCodeMap = state.mapping.itemCode;
+  const out = [];
+
+  for(let r=start; r<rows.length; r++){
+    const row = rows[r] || [];
+    const itemCodeVal = readMappedValue(itemCodeMap, row);
+    if(isBlank(itemCodeVal)) continue; // 沒有貨號視為非資料列（頁尾備註等）
+
+    const rec = { _row:r, excluded:false };
+    TARGET_FIELDS.forEach(f=>{
+      rec[f.key] = readMappedValue(state.mapping[f.key], row);
+    });
+    rec.noQuote = isBlank(rec.price);
+    out.push(rec);
+  }
+
+  const quoted = out.filter(r=>!r.noQuote);
+  const noQuote = out.filter(r=>r.noQuote);
+  state.preview = quoted.concat(noQuote);
+}
+function readMappedValue(m, row){
+  if(!m) return '';
+  if(m.mode==='constant') return m.value || '';
+  if(m.mode==='column' && m.column>-1) return row[m.column]!=null ? String(row[m.column]).trim() : '';
+  return '';
+}
+
+function renderPreviewTable(){
+  const table = $('#previewTable');
+  let html = '<thead><tr><th></th>';
+  TARGET_FIELDS.forEach(f=> html += `<th>${f.label}</th>`);
+  html += '</tr></thead><tbody>';
+  state.preview.forEach((rec, i)=>{
+    html += `<tr class="${rec.noQuote?'noquote':''} ${rec.excluded?'excluded':''}" data-i="${i}">`;
+    html += `<td class="chk"><input type="checkbox" ${rec.excluded?'':'checked'} data-toggle="${i}"></td>`;
+    TARGET_FIELDS.forEach(f=> html += `<td>${escapeHtml(rec[f.key])}</td>`);
+    html += '</tr>';
+  });
+  html += '</tbody>';
+  table.innerHTML = html;
+
+  table.querySelectorAll('[data-toggle]').forEach(chk=>{
+    chk.addEventListener('change', ()=>{
+      const i = Number(chk.dataset.toggle);
+      state.preview[i].excluded = !chk.checked;
+      updatePreviewStats();
+      chk.closest('tr').classList.toggle('excluded', state.preview[i].excluded);
+    });
+  });
+  updatePreviewStats();
+}
+function updatePreviewStats(){
+  const active = state.preview.filter(r=>!r.excluded);
+  $('#statTotal').textContent = active.length;
+  $('#statQuoted').textContent = active.filter(r=>!r.noQuote).length;
+  $('#statNoQuote').textContent = active.filter(r=>r.noQuote).length;
+  $('#statExcluded').textContent = state.preview.filter(r=>r.excluded).length;
+}
+
+$('#btn3Back').addEventListener('click', ()=> goToStep(2));
+$('#btn3Next').addEventListener('click', doExport);
+
+/* ============================================================
+   Step 4 — 產生 Excel、下載、上傳雲端
+   ============================================================ */
+async function doExport(){
+  const rows = state.preview.filter(r=>!r.excluded);
+  if(!rows.length){ showToast('沒有可匯出的品項', true); return; }
+
+  $('#btn3Next').disabled = true;
+  $('#btn3Next').textContent = '匯出中…';
+
+  try{
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('報價單匯入');
+    ws.columns = TARGET_FIELDS.map(f=> ({ header:f.exportHeader, key:f.key, width: Math.max(12, f.label.length*2+4) }));
+
+    const headerRow = ws.getRow(1);
+    headerRow.font = { bold:true };
+    headerRow.eachCell(cell=>{
+      cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFF3F2ED'} };
+    });
+
+    rows.forEach(rec=>{
+      const rowData = {};
+      TARGET_FIELDS.forEach(f=> rowData[f.key] = rec[f.key]);
+      const r = ws.addRow(rowData);
+      if(rec.noQuote){
+        r.eachCell(cell=>{
+          cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFFFEB99'} };
+          cell.font = { color:{argb:'FFB3261E'}, bold:true };
+        });
+      }
+    });
+    ws.views = [{ state:'frozen', ySplit:1 }];
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const custCode = readMappedValue(state.mapping.custCode, []) || (state.currentCustomer&&state.currentCustomer.code) || 'customer';
+    const custName = readMappedValue(state.mapping.custName, []) || (state.currentCustomer&&state.currentCustomer.name) || '';
+    const stamp = new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const fileName = `${custCode}_${custName}_報價單匯入_${stamp}.xlsx`.replace(/[\\/:*?"<>|]/g,'');
+
+    downloadBuffer(buffer, fileName);
+
+    // 若客戶尚未存在，先建立
+    if(!state.currentCustomer || !state.currentCustomer.code){
+      state.currentCustomer = { code: custCode, name: custName };
+    } else if(!state.currentCustomer.code){
+      state.currentCustomer.code = custCode;
+    }
+    await callBackend('upsertCustomer', { code: custCode, name: custName });
+
+    if($('#saveMappingChk').checked){
+      const mappingToSave = {};
+      TARGET_FIELDS.forEach(f=> mappingToSave[f.key] = state.mapping[f.key]);
+      await callBackend('saveMapping', { code: custCode, mapping: mappingToSave });
+    }
+
+    const base64 = arrayBufferToBase64(buffer);
+    const noQuoteCount = rows.filter(r=>r.noQuote).length;
+    await callBackend('recordExport', {
+      code: custCode, name: custName,
+      fileBase64: base64, fileName: fileName,
+      rowCount: rows.length, noQuoteCount: noQuoteCount
+    });
+
+    $('#doneBox').innerHTML = `<strong>匯出完成</strong>已下載「${escapeHtml(fileName)}」，並在客戶總覽標示「${escapeHtml(custCode)}」已匯出（共 ${rows.length} 筆，其中 ${noQuoteCount} 筆未報價）。`;
+    goToStep(4);
+  }catch(err){
+    showToast('匯出失敗：' + err.message, true);
+  }finally{
+    $('#btn3Next').disabled = false;
+    $('#btn3Next').textContent = '確認匯出';
+  }
+}
+
+function downloadBuffer(buffer, fileName){
+  const blob = new Blob([buffer], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = fileName;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function arrayBufferToBase64(buffer){
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunk = 0x8000;
+  for(let i=0;i<bytes.length;i+=chunk){
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i+chunk));
+  }
+  return btoa(binary);
+}
+
+/* ============================================================
+   啟動
+   ============================================================ */
+loadCustomers();
+</script>
+</body>
+</html>
