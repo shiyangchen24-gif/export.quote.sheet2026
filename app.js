@@ -20,6 +20,30 @@ const TARGET_FIELDS = [
 const OUTPUT_HEADERS = ['*客戶代號','客戶名稱','*客戶貨號','客戶商品名稱','客戶規格單位','*單價','備註','產區/品種','裝箱方式','包裝資材','產地','不報價原因','變價原因'];
 const OUTPUT_FIELD_ORDER = [null, null, '貨號', '品名', '單位', '單價', '備註', '產區品種', '裝箱方式', '包裝資材', '產地', '不報價原因', '變價原因'];
 
+const QUOTE_CYCLE_DAYS = { '7天': 7, '10天': 10, '15天': 15, '30天': 30 };
+
+// 解析後端存的 "yyyy/MM/dd HH:mm" 字串為 Date
+function parseDateLoose(s) {
+  if (!s) return null;
+  const m = String(s).match(/(\d{4})\/(\d{1,2})\/(\d{1,2})(?:\s+(\d{1,2}):(\d{1,2}))?/);
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0));
+}
+function formatDateShort(d) {
+  if (!d) return '';
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+}
+// 依「報價種類」與「最後匯出時間」計算到期日與是否已逾期（本期尚未匯出的提醒）
+function computeDueInfo(c) {
+  const days = QUOTE_CYCLE_DAYS[c.quoteType] || 7;
+  const last = parseDateLoose(c.lastExportTime);
+  if (!last) return { state: 'never', due: null };
+  const due = new Date(last.getTime());
+  due.setDate(due.getDate() + days);
+  const now = new Date();
+  return { state: now >= due ? 'overdue' : 'active', due };
+}
+
 let state = {
   customers: [],
   filter: 'all',
@@ -144,17 +168,24 @@ function readWorkbookRaw(file) {
 /* ---------------- 統計與表格渲染 ---------------- */
 function renderStats() {
   const total = state.customers.length;
-  const done = state.customers.filter(c => c.exportStatus === '已匯出').length;
+  let neverN = 0, overdueN = 0, activeN = 0;
+  state.customers.forEach(c => {
+    const info = computeDueInfo(c);
+    if (info.state === 'never') neverN++;
+    else if (info.state === 'overdue') overdueN++;
+    else activeN++;
+  });
   document.getElementById('statTotal').textContent = total;
-  document.getElementById('statDone').textContent = done;
-  document.getElementById('statPending').textContent = total - done;
+  document.getElementById('statPending').textContent = neverN;
+  document.getElementById('statOverdue').textContent = overdueN;
+  document.getElementById('statDone').textContent = activeN;
 }
 
 function filteredCustomers() {
   const kw = state.search.trim().toLowerCase();
   return state.customers.filter(c => {
-    if (state.filter === 'pending' && c.exportStatus === '已匯出') return false;
-    if (state.filter === 'done' && c.exportStatus !== '已匯出') return false;
+    const st = computeDueInfo(c).state;
+    if (state.filter !== 'all' && st !== state.filter) return false;
     if (kw && !(String(c.code).toLowerCase().includes(kw) || String(c.name).toLowerCase().includes(kw))) return false;
     return true;
   });
@@ -173,27 +204,30 @@ function renderTable() {
   }
   empty.style.display = 'none';
   tbody.innerHTML = list.map(c => {
-    const done = c.exportStatus === '已匯出';
-    const statusBadge = c.status === '停用'
-      ? '<span class="badge disabled">停用</span>'
-      : '<span class="badge disabled" style="background:var(--ok-100);color:var(--ok-600);">啟用</span>';
-    const exportBadge = done
-      ? '<span class="badge done">已匯出</span>'
-      : '<span class="badge pending">待匯出</span>';
+    const info = computeDueInfo(c);
+    let statusCell;
+    if (info.state === 'never') {
+      statusCell = `<span class="badge pending">尚未匯出過</span>`;
+    } else if (info.state === 'overdue') {
+      statusCell = `<span class="badge" style="background:var(--rust-100);color:var(--rust-600);">⚠ 本期已到期未匯出</span>
+        <div class="hint" style="margin-top:3px;">到期日 ${formatDateShort(info.due)}</div>`;
+    } else {
+      statusCell = `<span class="badge done">已匯出</span>
+        <div class="hint" style="margin-top:3px;">下期到期 ${formatDateShort(info.due)}</div>`;
+    }
     const mapTag = c.mapping
       ? '<span class="mapping-tag set">✓ 已設定</span>'
       : '<span class="mapping-tag">未設定</span>';
-    return `<tr>
+    return `<tr${info.state === 'overdue' ? ' style="background:var(--rust-100);"' : ''}>
       <td class="code">${escapeHtml(c.code)}</td>
       <td>${escapeHtml(c.name)}</td>
-      <td>${statusBadge}</td>
-      <td>${exportBadge}</td>
-      <td class="mono" style="font-size:12px;color:var(--ink-soft);">${escapeHtml(c.lastExportTime) || '—'}</td>
+      <td class="mono" style="font-size:12.5px;">${escapeHtml(c.quoteType)}</td>
+      <td>${statusCell}</td>
       <td>${mapTag}</td>
       <td class="actions">
         <button class="btn small" data-act="upload" data-code="${escapeHtml(c.code)}">上傳報價單</button>
         <button class="btn small" data-act="edit" data-code="${escapeHtml(c.code)}">編輯</button>
-        ${done ? `<button class="btn small" data-act="unexport" data-code="${escapeHtml(c.code)}">取消已匯出</button>` : ''}
+        ${info.state !== 'never' ? `<button class="btn small" data-act="unexport" data-code="${escapeHtml(c.code)}">清除匯出紀錄</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -212,13 +246,14 @@ document.getElementById('custTbody').addEventListener('click', e => {
 });
 
 async function unexportCustomer(customer) {
+  if (!confirm(`確定要清除 ${customer.code} 的匯出紀錄嗎？清除後將視為「尚未匯出過」，到期日重新計算。`)) return;
   setLoading(true, '更新狀態…');
   try {
     const res = await apiPost('resetExportStatus', { code: customer.code });
     if (!res.ok) throw new Error(res.error || '更新失敗');
     state.customers = res.customers;
     renderTable(); renderStats();
-    toast('ok', `已將 ${customer.code} 標記為待匯出`);
+    toast('ok', `已清除 ${customer.code} 的匯出紀錄`);
   } catch (err) { toast('err', err.message); }
   finally { setLoading(false); }
 }
@@ -235,14 +270,14 @@ document.getElementById('statusFilter').addEventListener('click', e => {
 });
 
 document.getElementById('btnResetAll').addEventListener('click', async () => {
-  if (!confirm('確定要將「全部」客戶的匯出狀態重置為待匯出嗎？（用於開始新一期報價作業）')) return;
+  if (!confirm('確定要清除「全部」客戶的匯出紀錄嗎？清除後全部客戶會變成「尚未匯出過」，到期日重新計算。')) return;
   setLoading(true, '重置中…');
   try {
     const res = await apiPost('resetAllExportStatus', {});
     if (!res.ok) throw new Error(res.error || '重置失敗');
     state.customers = res.customers;
     renderTable(); renderStats();
-    toast('ok', '已重置全部客戶為待匯出');
+    toast('ok', '已清除全部客戶的匯出紀錄');
   } catch (err) { toast('err', err.message); }
   finally { setLoading(false); }
 });
@@ -255,7 +290,7 @@ function openCustomerModal(customer) {
   document.getElementById('custCode').value = customer ? customer.code : '';
   document.getElementById('custCode').disabled = !!customer;
   document.getElementById('custName').value = customer ? customer.name : '';
-  document.getElementById('custStatus').value = customer ? customer.status : '啟用';
+  document.getElementById('custQuoteType').value = customer ? customer.quoteType : '7天';
   document.getElementById('custTradeStatus').value = customer ? customer.tradeStatus : '核准交易';
   openModal('ovCustomer');
 }
@@ -270,7 +305,7 @@ document.getElementById('btnSaveCustomer').addEventListener('click', async () =>
     const res = await apiPost('saveCustomer', {
       customer: {
         code, name,
-        status: document.getElementById('custStatus').value,
+        quoteType: document.getElementById('custQuoteType').value,
         tradeStatus: document.getElementById('custTradeStatus').value
       }
     });
