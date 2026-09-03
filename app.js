@@ -65,7 +65,7 @@ function jsonp(url, params) {
       done = true;
       cleanup();
       reject(new Error('連線逾時，請確認 GAS_URL 是否正確、部署存取權限是否為「任何人」'));
-    }, 15000);
+    }, 25000);
     function cleanup() {
       clearTimeout(timer);
       delete window[cbName];
@@ -87,17 +87,15 @@ function jsonp(url, params) {
     document.body.appendChild(script);
   });
 }
-function apiGet(action, params) {
-  return jsonp(GAS_URL, Object.assign({ action }, params || {}));
+function apiCall(action, params) {
+  const encoded = {};
+  Object.entries(params || {}).forEach(([k, v]) => {
+    encoded[k] = (v !== null && typeof v === 'object') ? JSON.stringify(v) : v;
+  });
+  return jsonp(GAS_URL, Object.assign({ action }, encoded));
 }
-function apiPost(action, payload) {
-  const body = Object.assign({ action }, payload || {});
-  return fetch(GAS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(body)
-  }).then(r => r.json());
-}
+// 保留舊名稱相容
+function apiGet(action, params) { return apiCall(action, params); }
 
 async function loadCustomers(showLoading) {
   if (showLoading) setLoading(true, '載入客戶資料…');
@@ -284,7 +282,7 @@ async function unexportCustomer(customer) {
   if (!confirm(`確定要清除 ${customer.code} 的匯出紀錄嗎？清除後將視為「尚未匯出過」，到期日重新計算。`)) return;
   setLoading(true, '更新狀態…');
   try {
-    const res = await apiPost('resetExportStatus', { code: customer.code });
+    const res = await apiCall('resetExportStatus', { code: customer.code });
     if (!res.ok) throw new Error(res.error || '更新失敗');
     upsertCustomer(res.customer);
     toast('ok', `已清除 ${customer.code} 的匯出紀錄`);
@@ -307,7 +305,7 @@ document.getElementById('btnResetAll').addEventListener('click', async () => {
   if (!confirm('確定要清除「全部」客戶的匯出紀錄嗎？清除後全部客戶會變成「尚未匯出過」，到期日重新計算。')) return;
   setLoading(true, '重置中…');
   try {
-    const res = await apiPost('resetAllExportStatus', {});
+    const res = await apiCall('resetAllExportStatus', {});
     if (!res.ok) throw new Error(res.error || '重置失敗');
     state.customers = res.customers;
     renderTable(); renderStats();
@@ -336,7 +334,7 @@ document.getElementById('btnSaveCustomer').addEventListener('click', async () =>
   if (!code) { toast('err', '請輸入客戶代號'); return; }
   setLoading(true, '儲存中…');
   try {
-    const res = await apiPost('saveCustomer', {
+    const res = await apiCall('saveCustomer', {
       customer: {
         code, name,
         quoteType: document.getElementById('custQuoteType').value,
@@ -401,10 +399,16 @@ document.getElementById('btnConfirmBatch').addEventListener('click', async () =>
   if (!batchParsed.length) return;
   setLoading(true, '匯入客戶中…');
   try {
-    const res = await apiPost('batchImportCustomers', { customers: batchParsed });
-    if (!res.ok) throw new Error(res.error || '匯入失敗');
-    state.customers = res.customers;
-    renderTable(); renderStats();
+    // 走 GET/JSONP 有網址長度限制，客戶數量多時分批送出，避免超過瀏覽器網址長度上限
+    const CHUNK = 60;
+    let lastRes = null;
+    for (let i = 0; i < batchParsed.length; i += CHUNK) {
+      const chunk = batchParsed.slice(i, i + CHUNK);
+      setLoading(true, `匯入客戶中… (${Math.min(i + CHUNK, batchParsed.length)}/${batchParsed.length})`);
+      lastRes = await apiCall('batchImportCustomers', { customers: chunk });
+      if (!lastRes.ok) throw new Error(lastRes.error || '匯入失敗');
+    }
+    if (lastRes) { state.customers = lastRes.customers; renderTable(); renderStats(); }
     closeModal('ovBatch');
     toast('ok', `已匯入 ${batchParsed.length} 筆客戶資料`);
   } catch (err) { toast('err', err.message); }
@@ -641,7 +645,7 @@ document.getElementById('wizBack').addEventListener('click', () => {
 async function saveMappingForCustomer() {
   try {
     const mapping = { dataStartRowIdx: state.wizard.dataStartRowIdx, columnMap: state.wizard.columnMap };
-    const res = await apiPost('saveMapping', { code: state.wizard.customer.code, mapping });
+    const res = await apiCall('saveMapping', { code: state.wizard.customer.code, mapping });
     if (res.ok && res.customer) {
       state.wizard.customer = res.customer;
       upsertCustomer(res.customer);
@@ -714,7 +718,7 @@ document.getElementById('wizExport').addEventListener('click', async () => {
     setLoading(true, '產生匯出檔案…');
     const outName = await exportWorkbook(customer, convertedRecords);
     setLoading(true, '更新匯出狀態…');
-    const res = await apiPost('markExported', { code: customer.code, fileName: outName, itemCount: convertedRecords.length });
+    const res = await apiCall('markExported', { code: customer.code, fileName: outName, itemCount: convertedRecords.length });
     if (!res.ok) throw new Error(res.error || '更新狀態失敗');
     upsertCustomer(res.customer);
     closeModal('ovWizard');
