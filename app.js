@@ -323,7 +323,7 @@ function openCustomerModal(customer) {
   document.getElementById('custCode').disabled = !!customer;
   document.getElementById('custName').value = customer ? customer.name : '';
   document.getElementById('custQuoteType').value = customer ? customer.quoteType : '7天';
-  document.getElementById('custTradeStatus').value = customer ? customer.tradeStatus : '核准交易';
+  document.getElementById('custExportStatus').value = customer ? (customer.exportStatus === '已匯出' ? '已匯出' : '未匯出') : '未匯出';
   openModal('ovCustomer');
 }
 document.getElementById('btnAddCustomer').addEventListener('click', () => openCustomerModal(null));
@@ -338,7 +338,7 @@ document.getElementById('btnSaveCustomer').addEventListener('click', async () =>
       customer: {
         code, name,
         quoteType: document.getElementById('custQuoteType').value,
-        tradeStatus: document.getElementById('custTradeStatus').value
+        exportStatus: document.getElementById('custExportStatus').value
       }
     });
     if (!res.ok) throw new Error(res.error || '儲存失敗');
