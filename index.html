@@ -349,8 +349,12 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
           <div class="hint">從最近一次匯出日起算，到期日 = 匯出日 + 天數</div>
         </div>
         <div class="field">
-          <label>交易狀態</label>
-          <select id="custTradeStatus"><option>核准交易</option><option>暫停交易</option></select>
+          <label>匯出狀態</label>
+          <select id="custExportStatus">
+            <option value="未匯出">尚未匯出</option>
+            <option value="已匯出">已匯出</option>
+          </select>
+          <div class="hint">手動調整時，若切換為「已匯出」會以現在時間重新計算到期日</div>
         </div>
       </div>
     </div>
