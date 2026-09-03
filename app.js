@@ -92,7 +92,16 @@ function apiCall(action, params) {
   Object.entries(params || {}).forEach(([k, v]) => {
     encoded[k] = (v !== null && typeof v === 'object') ? JSON.stringify(v) : v;
   });
-  return jsonp(GAS_URL, Object.assign({ action }, encoded));
+  return jsonp(GAS_URL, Object.assign({ action }, encoded)).catch(err => {
+    // 寫入類動作若沒收到回應，伺服器端有可能其實已經執行成功（只是回應沒送達瀏覽器）。
+    // 背景分幾次重新讀取最新資料，讓畫面在數秒到十幾秒內自動校正，不用使用者手動重新整理。
+    if (action !== 'getData') {
+      loadCustomers(false);
+      setTimeout(() => loadCustomers(false), 4000);
+      setTimeout(() => loadCustomers(false), 10000);
+    }
+    throw err;
+  });
 }
 // 保留舊名稱相容
 function apiGet(action, params) { return apiCall(action, params); }
@@ -713,18 +722,30 @@ document.getElementById('wizExport').addEventListener('click', async () => {
   const { customer, convertedRecords } = state.wizard;
   if (!convertedRecords.length) return;
   setLoading(true, '準備匯出元件…');
+  let outName;
   try {
     await ensureExcelJS();
     setLoading(true, '產生匯出檔案…');
-    const outName = await exportWorkbook(customer, convertedRecords);
-    setLoading(true, '更新匯出狀態…');
+    outName = await exportWorkbook(customer, convertedRecords);
+  } catch (err) {
+    setLoading(false);
+    toast('err', '產生匯出檔案失敗：' + err.message);
+    return;
+  }
+  setLoading(true, '更新匯出狀態…');
+  try {
     const res = await apiCall('markExported', { code: customer.code, fileName: outName, itemCount: convertedRecords.length });
     if (!res.ok) throw new Error(res.error || '更新狀態失敗');
     upsertCustomer(res.customer);
     closeModal('ovWizard');
     toast('ok', `已匯出 ${customer.code}，共 ${convertedRecords.length} 項，並標示為已匯出`);
-  } catch (err) { toast('err', err.message); }
-  finally { setLoading(false); }
+  } catch (err) {
+    // 檔案已經下載成功，只是這次沒收到雲端狀態更新的回應（伺服器端很可能其實已寫入成功）。
+    // apiCall 內部已觸發背景重新整理，這裡再補提示，表格幾秒內應該會自動校正。
+    toast('err', `檔案已下載，但狀態更新沒有收到回應，正在背景重新確認最新狀態…（${err.message}）`);
+  } finally {
+    setLoading(false);
+  }
 });
 
 /* ---------------- 初始化 ---------------- */
