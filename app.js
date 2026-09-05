@@ -2,8 +2,8 @@
 
 // 請將此網址換成你部署後的 GAS 執行網址（.../exec）
 const GAS_URL = 'https://script.google.com/macros/s/AKfycby6_k1MtdA07FIN26lBYNkoYTpW-Hm4H7bJ4gkVkkCjZvonj7Lz4vKEjvOJV4ybZ2Oc/exec';
-const FRONTEND_VERSION = '2026-09-05-v8';
-const EXPECTED_BACKEND_VERSION = '2026-09-05-v8'; // 要跟 Code.gs 裡的 BACKEND_VERSION 一致
+const FRONTEND_VERSION = '2026-09-06-v9';
+const EXPECTED_BACKEND_VERSION = '2026-09-06-v9'; // 要跟 Code.gs 裡的 BACKEND_VERSION 一致
 
 const TARGET_FIELDS_BASE = [
   { key: '貨號',     label: '客戶貨號 *',   required: true },
