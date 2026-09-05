@@ -102,6 +102,11 @@ input,select{font-family:inherit;}
 .select-filter{
   padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px;color:var(--ink);
 }
+.row-menu label{
+  display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:13px;color:var(--ink);border-radius:7px;cursor:pointer;
+}
+.row-menu label:hover{background:var(--paper-100);}
+.row-menu label input{margin:0;}
 
 .btn{
   border:1px solid var(--line);background:#fff;color:var(--ink);
@@ -138,6 +143,13 @@ thead th{
   color:var(--ink-soft);font-weight:600;font-size:11.5px;letter-spacing:.02em;
   border-bottom:1px solid var(--line);
 }
+.th-filter-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:18px;height:18px;padding:0;margin-left:3px;border:none;background:transparent;
+  color:var(--ink-soft);border-radius:5px;vertical-align:middle;
+}
+.th-filter-btn:hover{background:var(--paper-200);color:var(--ink);}
+.th-filter-btn.active{color:var(--leaf-600);background:var(--ok-100);}
 tbody td{padding:11px 14px;border-bottom:1px solid var(--paper-200);vertical-align:middle;}
 tbody tr:last-child td{border-bottom:none;}
 tbody tr:hover{background:var(--paper-50);}
@@ -303,13 +315,6 @@ tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="搜尋客戶代號或名稱…">
     </div>
-    <select class="select-filter" id="cycleFilter">
-      <option value="all">全部週期</option>
-      <option value="7天">7天</option>
-      <option value="10天">10天</option>
-      <option value="15天">15天</option>
-      <option value="30天">30天</option>
-    </select>
     <button class="btn btn-ghost" id="btnResetAll">重置本期匯出狀態</button>
     <button class="btn btn-secondary" id="btnBatchImport">批次匯入客戶</button>
     <button class="btn btn-secondary" id="btnBatchQuotes">批次匯入報價單</button>
@@ -322,8 +327,16 @@ tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-
         <tr>
           <th style="width:100px;">客戶代號</th>
           <th>客戶名稱</th>
-          <th style="width:90px;">報價種類</th>
-          <th style="width:80px;">報價週期</th>
+          <th style="width:100px;">報價種類
+            <button class="th-filter-btn" data-filter-col="productCodeMode" aria-label="篩選報價種類" title="篩選">
+              <svg viewBox="0 0 16 16" width="11" height="11"><path d="M1 2h14l-5 6v5l-4 2v-7z" fill="currentColor"/></svg>
+            </button>
+          </th>
+          <th style="width:90px;">報價週期
+            <button class="th-filter-btn" data-filter-col="quoteCycle" aria-label="篩選報價週期" title="篩選">
+              <svg viewBox="0 0 16 16" width="11" height="11"><path d="M1 2h14l-5 6v5l-4 2v-7z" fill="currentColor"/></svg>
+            </button>
+          </th>
           <th style="width:100px;">匯出格式</th>
           <th style="width:150px;">匯出狀態</th>
           <th style="width:250px;text-align:right;">操作</th>
@@ -346,6 +359,9 @@ tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-
   <button data-menu-act="reconfigure">重新設定欄位對應</button>
   <button data-menu-act="unexport">清除匯出紀錄</button>
 </div>
+
+<!-- 欄位篩選選單（共用一個，動態定位與內容） -->
+<div class="row-menu" id="colFilterMenu"></div>
 
 <!-- ============ 新增/編輯客戶 Modal ============ -->
 <div class="overlay" id="ovCustomer">
@@ -537,6 +553,6 @@ tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-06-v9"></script>
+<script src="app.js?v=2026-09-06-v10"></script>
 </body>
 </html>
