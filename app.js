@@ -2,8 +2,8 @@
 
 // 請將此網址換成你部署後的 GAS 執行網址（.../exec）
 const GAS_URL = 'https://script.google.com/macros/s/AKfycby6_k1MtdA07FIN26lBYNkoYTpW-Hm4H7bJ4gkVkkCjZvonj7Lz4vKEjvOJV4ybZ2Oc/exec';
-const FRONTEND_VERSION = '2026-09-06-v9';
-const EXPECTED_BACKEND_VERSION = '2026-09-06-v9'; // 要跟 Code.gs 裡的 BACKEND_VERSION 一致
+const FRONTEND_VERSION = '2026-09-06-v10';
+const EXPECTED_BACKEND_VERSION = '2026-09-06-v10'; // 要跟 Code.gs 裡的 BACKEND_VERSION 一致
 
 const TARGET_FIELDS_BASE = [
   { key: '貨號',     label: '客戶貨號 *',   required: true },
@@ -68,6 +68,7 @@ let state = {
   customers: [],
   statFilter: 'all', // all | exported | notExported | notConfigured
   cycleFilter: 'all', // all | 7天 | 10天 | 15天 | 30天
+  productCodeModeFilter: 'all', // all | 有貨號 | 無貨號
   search: '',
   wizard: null // 見 openWizard()
 };
@@ -366,6 +367,7 @@ function filteredCustomers() {
     if (state.statFilter === 'notExported' && info.state === 'active') return false;
     if (state.statFilter === 'notConfigured' && c.mapping) return false;
     if (state.cycleFilter !== 'all' && c.quoteCycle !== state.cycleFilter) return false;
+    if (state.productCodeModeFilter !== 'all' && c.productCodeMode !== state.productCodeModeFilter) return false;
     if (kw && !(String(c.code).toLowerCase().includes(kw) || String(c.name).toLowerCase().includes(kw))) return false;
     return true;
   });
@@ -514,12 +516,9 @@ function openHistoryModal(customer) {
   openModal('ovHistory');
 }
 
-/* ---------------- 篩選列（搜尋 / 週期 / 統計卡） ---------------- */
+/* ---------------- 篩選列（搜尋 / 統計卡 / 欄位篩選 icon） ---------------- */
 document.getElementById('searchInput').addEventListener('input', e => {
   state.search = e.target.value; renderTable();
-});
-document.getElementById('cycleFilter').addEventListener('change', e => {
-  state.cycleFilter = e.target.value; renderTable();
 });
 document.getElementById('statCards').addEventListener('click', e => {
   const card = e.target.closest('.stat-card');
@@ -527,6 +526,69 @@ document.getElementById('statCards').addEventListener('click', e => {
   state.statFilter = card.getAttribute('data-filter');
   document.querySelectorAll('#statCards .stat-card').forEach(c => c.classList.toggle('active', c === card));
   renderTable();
+});
+
+/* 表頭欄位篩選（報價種類／報價週期旁的篩選 icon） */
+const COLUMN_FILTER_OPTIONS = {
+  productCodeMode: { stateKey: 'productCodeModeFilter', options: [['all', '全部'], ['有貨號', '有貨號'], ['無貨號', '無貨號']] },
+  quoteCycle: { stateKey: 'cycleFilter', options: [['all', '全部週期'], ['7天', '7天'], ['10天', '10天'], ['15天', '15天'], ['30天', '30天']] }
+};
+const colFilterMenuEl = document.getElementById('colFilterMenu');
+let colFilterCurrentCol = null;
+
+function updateFilterIconStates() {
+  document.querySelectorAll('.th-filter-btn[data-filter-col]').forEach(btn => {
+    const col = btn.getAttribute('data-filter-col');
+    const cfg = COLUMN_FILTER_OPTIONS[col];
+    if (!cfg) return;
+    btn.classList.toggle('active', state[cfg.stateKey] !== 'all');
+  });
+}
+
+function openColFilterMenu(btn, col) {
+  const cfg = COLUMN_FILTER_OPTIONS[col];
+  if (!cfg) return;
+  colFilterCurrentCol = col;
+  const current = state[cfg.stateKey];
+  colFilterMenuEl.innerHTML = cfg.options.map(([value, label]) => `
+    <label>
+      <input type="radio" name="colFilterRadio" value="${value}" ${current === value ? 'checked' : ''}>
+      ${escapeHtml(label)}
+    </label>
+  `).join('');
+  colFilterMenuEl.style.display = 'flex';
+  const rect = btn.getBoundingClientRect();
+  const menuRect = colFilterMenuEl.getBoundingClientRect();
+  let top = rect.bottom + 6;
+  if (top + menuRect.height > window.innerHeight) top = rect.top - menuRect.height - 6;
+  let left = rect.left;
+  if (left + menuRect.width > window.innerWidth - 8) left = window.innerWidth - menuRect.width - 8;
+  colFilterMenuEl.style.top = top + 'px';
+  colFilterMenuEl.style.left = left + 'px';
+}
+function closeColFilterMenu() { colFilterMenuEl.style.display = 'none'; colFilterCurrentCol = null; }
+
+document.querySelectorAll('.th-filter-btn[data-filter-col]').forEach(btn => {
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    closeRowMenu(); // 避免跟三點選單同時開著
+    const col = btn.getAttribute('data-filter-col');
+    if (colFilterCurrentCol === col && colFilterMenuEl.style.display === 'flex') { closeColFilterMenu(); return; }
+    openColFilterMenu(btn, col);
+  });
+});
+colFilterMenuEl.addEventListener('change', e => {
+  const radio = e.target.closest('input[name="colFilterRadio"]');
+  if (!radio || !colFilterCurrentCol) return;
+  const cfg = COLUMN_FILTER_OPTIONS[colFilterCurrentCol];
+  state[cfg.stateKey] = radio.value;
+  updateFilterIconStates();
+  renderTable();
+  closeColFilterMenu();
+});
+document.addEventListener('click', e => {
+  if (e.target.closest('#colFilterMenu') || e.target.closest('[data-filter-col]')) return;
+  closeColFilterMenu();
 });
 
 document.getElementById('btnResetAll').addEventListener('click', async () => {
@@ -1012,6 +1074,7 @@ document.getElementById('wizExport').addEventListener('click', async () => {
 /* ---------------- 初始化 ---------------- */
 const _fvStamp = document.getElementById('frontendVersionStamp');
 if (_fvStamp) _fvStamp.textContent = FRONTEND_VERSION; else console.warn('找不到版本標示欄位，頁面可能不是最新版本');
+updateFilterIconStates();
 loadCustomers(true);
 let pollTimer = setInterval(() => { if (!document.hidden) loadCustomers(false); }, 25000);
 document.addEventListener('visibilitychange', () => {
