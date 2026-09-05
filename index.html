@@ -263,6 +263,9 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
 <body>
 
 <div class="shell">
+  <div id="versionBanner" style="display:none;align-items:flex-start;gap:10px;background:var(--rust-100);color:var(--rust-600);border:1px solid var(--rust-600);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:13px;line-height:1.6;">
+    <span style="flex:1;"></span>
+  </div>
   <div class="topbar">
     <div class="brand-mark">
       <div class="glyph">忠</div>
@@ -314,6 +317,7 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
       <p>請先「新增客戶」或「批次匯入客戶」建立客戶主檔</p>
     </div>
   </div>
+  <div style="text-align:right;margin-top:10px;font-size:11px;color:var(--ink-soft);" class="mono">前端版本 <span id="frontendVersionStamp"></span></div>
 </div>
 
 <!-- ============ 新增/編輯客戶 Modal ============ -->
@@ -446,6 +450,6 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js"></script>
+<script src="app.js?v=2026-09-04-v7"></script>
 </body>
 </html>
