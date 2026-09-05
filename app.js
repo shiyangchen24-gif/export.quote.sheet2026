@@ -2,6 +2,8 @@
 
 // 請將此網址換成你部署後的 GAS 執行網址（.../exec）
 const GAS_URL = 'https://script.google.com/macros/s/AKfycby6_k1MtdA07FIN26lBYNkoYTpW-Hm4H7bJ4gkVkkCjZvonj7Lz4vKEjvOJV4ybZ2Oc/exec';
+const FRONTEND_VERSION = '2026-09-04-v7';
+const EXPECTED_BACKEND_VERSION = '2026-09-04-v7'; // 要跟 Code.gs 裡的 BACKEND_VERSION 一致
 
 const TARGET_FIELDS = [
   { key: '貨號',     label: '客戶貨號 *',   required: true },
@@ -92,7 +94,10 @@ function apiCall(action, params) {
   Object.entries(params || {}).forEach(([k, v]) => {
     encoded[k] = (v !== null && typeof v === 'object') ? JSON.stringify(v) : v;
   });
-  return jsonp(GAS_URL, Object.assign({ action }, encoded)).catch(err => {
+  return jsonp(GAS_URL, Object.assign({ action }, encoded)).then(res => {
+    if (res && res.backendVersion) checkVersionMismatch(res.backendVersion);
+    return res;
+  }).catch(err => {
     // 寫入類動作若沒收到回應，伺服器端有可能其實已經執行成功（只是回應沒送達瀏覽器）。
     // 背景分幾次重新讀取最新資料，讓畫面在數秒到十幾秒內自動校正，不用使用者手動重新整理。
     if (action !== 'getData') {
@@ -118,6 +123,23 @@ async function loadCustomers(showLoading) {
     toast('err', '載入失敗：' + err.message);
   } finally {
     if (showLoading) setLoading(false);
+  }
+}
+
+// 版本比對：如果後端回傳的版本跟這份前端預期的不一樣，代表 Code.gs 存了檔但沒有「部署新版本」，
+// 或是瀏覽器還在用舊快取的 app.js —— 這是這個專案最常反覆出現的問題成因，直接在畫面上顯示出來，
+// 不用再靠猜的。
+let versionWarned = false;
+function checkVersionMismatch(backendVersion) {
+  const banner = document.getElementById('versionBanner');
+  if (!banner) return;
+  if (backendVersion && backendVersion !== EXPECTED_BACKEND_VERSION) {
+    banner.style.display = 'flex';
+    banner.querySelector('span').textContent =
+      `⚠ 偵測到版本不一致：網頁預期後端版本「${EXPECTED_BACKEND_VERSION}」，但目前 Apps Script 實際回應的是「${backendVersion}」。這通常代表 Code.gs 只存檔、還沒「部署新版本」。請到 Apps Script →「部署」→「管理部署作業」→ 編輯 → 版本選「新版本」→ 部署。`;
+    if (!versionWarned) { versionWarned = true; toast('err', '偵測到後端版本不是最新，請重新部署 Apps Script（詳見畫面上方提示）'); }
+  } else {
+    banner.style.display = 'none';
   }
 }
 
@@ -282,9 +304,15 @@ document.getElementById('custTbody').addEventListener('click', e => {
   const customer = state.customers.find(c => c.code === code);
   if (!customer) return;
   const act = btn.getAttribute('data-act');
-  if (act === 'upload') openWizard(customer);
-  else if (act === 'edit') openCustomerModal(customer);
-  else if (act === 'unexport') unexportCustomer(customer);
+  try {
+    if (act === 'upload') openWizard(customer);
+    else if (act === 'edit') openCustomerModal(customer);
+    else if (act === 'unexport') unexportCustomer(customer);
+  } catch (err) {
+    // 避免頁面元素跟程式碼版本不一致時（例如 index.html 沒有更新到最新版）整個按鈕悄悄失效，
+    // 至少跳出提示，而不是使用者點了完全沒反應。
+    toast('err', '操作失敗，頁面可能不是最新版本，請重新整理或確認部署檔案是否為最新：' + err.message);
+  }
 });
 
 async function unexportCustomer(customer) {
@@ -327,12 +355,13 @@ document.getElementById('btnResetAll').addEventListener('click', async () => {
 let editingCode = null;
 function openCustomerModal(customer) {
   editingCode = customer ? customer.code : null;
+  const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; else console.warn('找不到欄位 #' + id + '，頁面可能不是最新版本'); };
   document.getElementById('custModalTitle').textContent = customer ? '編輯客戶' : '新增客戶';
-  document.getElementById('custCode').value = customer ? customer.code : '';
+  setVal('custCode', customer ? customer.code : '');
   document.getElementById('custCode').disabled = !!customer;
-  document.getElementById('custName').value = customer ? customer.name : '';
-  document.getElementById('custQuoteType').value = customer ? customer.quoteType : '7天';
-  document.getElementById('custExportStatus').value = customer ? (customer.exportStatus === '已匯出' ? '已匯出' : '未匯出') : '未匯出';
+  setVal('custName', customer ? customer.name : '');
+  setVal('custQuoteType', customer ? customer.quoteType : '7天');
+  setVal('custExportStatus', customer ? (customer.exportStatus === '已匯出' ? '已匯出' : '未匯出') : '未匯出');
   openModal('ovCustomer');
 }
 document.getElementById('btnAddCustomer').addEventListener('click', () => openCustomerModal(null));
@@ -749,6 +778,8 @@ document.getElementById('wizExport').addEventListener('click', async () => {
 });
 
 /* ---------------- 初始化 ---------------- */
+const _fvStamp = document.getElementById('frontendVersionStamp');
+if (_fvStamp) _fvStamp.textContent = FRONTEND_VERSION; else console.warn('找不到版本標示欄位，頁面可能不是最新版本');
 loadCustomers(true);
 let pollTimer = setInterval(() => { if (!document.hidden) loadCustomers(false); }, 25000);
 document.addEventListener('visibilitychange', () => {
