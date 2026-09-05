@@ -26,6 +26,14 @@
   --rust-100:#f6dfd8;
   --ok-600:#3c6e4c;
   --ok-100:#dcead9;
+  /* 指定色系 */
+  --green-ok:#31B54C;
+  --green-ok-bg:#e4f6e8;
+  --red-bad:#FF524D;
+  --red-bad-bg:#ffe7e6;
+  --orange-action:#ff8637;
+  --green-export:#1F7A3D;
+  --new-item-yellow:#ffde5a;
   --radius:10px;
   --shadow:0 1px 2px rgba(22,26,20,.06), 0 6px 20px rgba(22,26,20,.05);
   font-size:15px;
@@ -44,16 +52,14 @@ button{font-family:inherit;cursor:pointer;}
 input,select{font-family:inherit;}
 
 /* ---------- shell ---------- */
-.shell{max-width:1180px;margin:0 auto;padding:28px 24px 80px;}
+.shell{max-width:1240px;margin:0 auto;padding:28px 24px 80px;}
 .topbar{
   display:flex;align-items:flex-end;justify-content:space-between;
   gap:20px;flex-wrap:wrap;
   border-bottom:1px solid var(--line);
-  padding-bottom:20px;margin-bottom:22px;
+  padding-bottom:20px;margin-bottom:18px;
 }
-.brand-mark{
-  display:flex;align-items:center;gap:12px;
-}
+.brand-mark{display:flex;align-items:center;gap:12px;}
 .brand-mark .glyph{
   width:38px;height:38px;border-radius:9px;
   background:linear-gradient(155deg,var(--leaf-600),var(--soil-900));
@@ -64,24 +70,21 @@ input,select{font-family:inherit;}
 .brand-mark h1{font-size:19px;font-weight:700;margin:0;letter-spacing:-.01em;}
 .brand-mark p{margin:2px 0 0;font-size:12.5px;color:var(--ink-soft);}
 
-.stat-row{display:flex;gap:10px;flex-wrap:wrap;}
-.stat-chip{
-  background:#fff;border:1px solid var(--line);border-radius:9px;
-  padding:8px 14px;min-width:84px;text-align:center;
+/* 統計卡（可點擊篩選） */
+.stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;}
+.stat-card{
+  background:#fff;border:1.5px solid var(--line);border-radius:10px;
+  padding:10px 18px;min-width:96px;text-align:center;cursor:pointer;
+  transition:border-color .12s, box-shadow .12s;
 }
-.stat-chip .n{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:18px;display:block;line-height:1.1;}
-.stat-chip .l{font-size:11px;color:var(--ink-soft);margin-top:2px;display:block;}
-.stat-chip.pending .n{color:var(--amber-500);}
-.stat-chip.done .n{color:var(--ok-600);}
+.stat-card:hover{border-color:var(--ink-soft);}
+.stat-card.active{border-color:var(--soil-900);box-shadow:0 0 0 2px rgba(31,36,25,.08);}
+.stat-card .n{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:19px;display:block;line-height:1.1;}
+.stat-card .l{font-size:11px;color:var(--ink-soft);margin-top:3px;display:block;}
 
 /* toolbar */
-.toolbar{
-  display:flex;gap:10px;align-items:center;flex-wrap:wrap;
-  margin-bottom:16px;
-}
-.search-box{
-  flex:1;min-width:180px;position:relative;
-}
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;}
+.search-box{flex:1;min-width:180px;position:relative;}
 .search-box input{
   width:100%;padding:9px 12px 9px 34px;border:1px solid var(--line);border-radius:8px;
   background:#fff;font-size:13.5px;color:var(--ink);
@@ -95,19 +98,15 @@ input,select{font-family:inherit;}
   content:"";position:absolute;left:20.5px;top:calc(50% + 5px);
   width:6px;height:1.6px;background:var(--ink-soft);transform:rotate(45deg);
 }
-.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff;}
-.seg button{
-  border:none;background:transparent;padding:8px 13px;font-size:13px;color:var(--ink-soft);
-  border-right:1px solid var(--line);font-weight:500;
+.select-filter{
+  padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px;color:var(--ink);
 }
-.seg button:last-child{border-right:none;}
-.seg button.active{background:var(--soil-900);color:#fff;}
 
 .btn{
   border:1px solid var(--line);background:#fff;color:var(--ink);
   padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;
   display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
-  transition:border-color .12s, background .12s;
+  transition:border-color .12s, background .12s, opacity .12s;
 }
 .btn:hover{border-color:var(--ink-soft);}
 .btn-primary{background:var(--leaf-600);border-color:var(--leaf-600);color:#fff;}
@@ -116,14 +115,22 @@ input,select{font-family:inherit;}
 .btn-dark:hover{background:#0f1209;}
 .btn-ghost{background:transparent;border-color:transparent;}
 .btn-ghost:hover{background:var(--paper-200);}
+.btn-secondary{background:#fff;border-color:var(--line);color:var(--ink);}
+.btn-export{background:var(--green-export);border-color:var(--green-export);color:#fff;}
+.btn-export:hover{opacity:.9;}
+.btn-upload{background:var(--orange-action);border-color:var(--orange-action);color:#fff;}
+.btn-upload:hover{opacity:.9;}
 .btn-danger{color:var(--rust-600);}
 .btn:disabled{opacity:.45;cursor:not-allowed;}
 .btn.small{padding:5px 10px;font-size:12px;border-radius:6px;}
+.btn-icon{
+  width:30px;height:30px;padding:0;justify-content:center;border-radius:7px;
+  border:1px solid var(--line);background:#fff;color:var(--ink-soft);font-size:16px;font-weight:700;
+}
+.btn-icon:hover{background:var(--paper-200);color:var(--ink);}
 
 /* table */
-.table-wrap{
-  background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow);
-}
+.table-wrap{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:visible;box-shadow:var(--shadow);}
 table{width:100%;border-collapse:collapse;font-size:13px;}
 thead th{
   text-align:left;padding:11px 14px;background:var(--paper-100);
@@ -134,28 +141,35 @@ tbody td{padding:11px 14px;border-bottom:1px solid var(--paper-200);vertical-ali
 tbody tr:last-child td{border-bottom:none;}
 tbody tr:hover{background:var(--paper-50);}
 td.code{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--soil-900);}
-td.actions{text-align:right;white-space:nowrap;}
-td.actions .btn{margin-left:6px;}
+td.actions{text-align:right;white-space:nowrap;position:relative;}
+td.actions .btn,td.actions .btn-icon{margin-left:6px;}
 
 .badge{
   display:inline-flex;align-items:center;gap:5px;
   padding:3px 9px;border-radius:20px;font-size:11.5px;font-weight:600;
 }
 .badge::before{content:"";width:6px;height:6px;border-radius:50%;}
-.badge.pending{background:var(--amber-100);color:#8a5a17;}
-.badge.pending::before{background:var(--amber-500);}
-.badge.done{background:var(--ok-100);color:var(--ok-600);}
-.badge.done::before{background:var(--ok-600);}
-.badge.disabled{background:var(--paper-200);color:var(--ink-soft);}
-.badge.disabled::before{background:var(--ink-soft);}
-
-.mapping-tag{font-size:11.5px;color:var(--ink-soft);}
-.mapping-tag.set{color:var(--leaf-600);font-weight:600;}
+.badge.badge-green{background:var(--green-ok-bg);color:var(--green-ok);}
+.badge.badge-green::before{background:var(--green-ok);}
+.badge.badge-red{background:var(--red-bad-bg);color:var(--red-bad);}
+.badge.badge-red::before{background:var(--red-bad);}
 
 .empty-state{padding:56px 20px;text-align:center;color:var(--ink-soft);}
 .empty-state .glyph{font-size:26px;margin-bottom:8px;}
 .empty-state h3{margin:0 0 4px;color:var(--ink);font-size:15px;}
 .empty-state p{margin:0;font-size:13px;}
+
+/* 三點選單 */
+.row-menu{
+  position:fixed;display:none;flex-direction:column;min-width:172px;
+  background:#fff;border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 10px 30px rgba(22,26,20,.18);z-index:150;overflow:hidden;padding:4px;
+}
+.row-menu button{
+  text-align:left;border:none;background:transparent;padding:9px 12px;font-size:13px;color:var(--ink);border-radius:7px;
+}
+.row-menu button:hover{background:var(--paper-100);}
+.row-menu button.danger{color:var(--rust-600);}
 
 /* ---------- modal ---------- */
 .overlay{
@@ -206,9 +220,7 @@ td.actions .btn{margin-left:6px;}
 .dropzone strong{color:var(--ink);}
 
 .wizard-steps{display:flex;gap:6px;margin-bottom:18px;}
-.wizard-steps .step{
-  flex:1;height:4px;border-radius:3px;background:var(--paper-200);
-}
+.wizard-steps .step{flex:1;height:4px;border-radius:3px;background:var(--paper-200);}
 .wizard-steps .step.active,.wizard-steps .step.done{background:var(--leaf-600);}
 
 .preview-scroll{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:8px;}
@@ -226,9 +238,13 @@ td.actions .btn{margin-left:6px;}
 .result-summary{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
 .pill{padding:6px 12px;border-radius:8px;font-size:12.5px;font-weight:600;background:var(--paper-100);color:var(--ink-soft);}
 .pill.ok{background:var(--ok-100);color:var(--ok-600);}
-.pill.warn{background:var(--amber-100);color:#8a5a17;}
+.pill.warn{background:#fff4cf;color:#8a6d17;}
 
-tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) !important;font-weight:500;}
+tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-bad) !important;font-weight:500;}
+
+.kv-table{width:100%;border-collapse:collapse;font-size:13.5px;}
+.kv-table td{padding:8px 4px;border-bottom:1px solid var(--paper-200);}
+.kv-table td:first-child{color:var(--ink-soft);width:38%;}
 
 .toast-wrap{position:fixed;bottom:22px;right:22px;z-index:200;display:flex;flex-direction:column;gap:8px;}
 .toast{
@@ -240,10 +256,7 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
 .toast.ok{background:var(--leaf-700);}
 @keyframes toast-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
 
-.spinner{
-  width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.35);
-  border-top-color:#fff;animation:spin .7s linear infinite;flex-shrink:0;
-}
+.spinner{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;animation:spin .7s linear infinite;flex-shrink:0;}
 @keyframes spin{to{transform:rotate(360deg);}}
 .loading-overlay{
   position:fixed;inset:0;background:rgba(248,247,242,.7);z-index:300;
@@ -274,39 +287,43 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
         <p>匯入客戶原始報價單 → 轉換為標準匯入格式並匯出</p>
       </div>
     </div>
-    <div class="stat-row">
-      <div class="stat-chip"><span class="n mono" id="statTotal">0</span><span class="l">客戶數</span></div>
-      <div class="stat-chip pending"><span class="n mono" id="statPending">0</span><span class="l">尚未匯出過</span></div>
-      <div class="stat-chip" id="statOverdueChip" style="border-color:var(--rust-600);"><span class="n mono" id="statOverdue" style="color:var(--rust-600);">0</span><span class="l">已到期未匯出</span></div>
-      <div class="stat-chip done"><span class="n mono" id="statDone">0</span><span class="l">匯出中（有效期內）</span></div>
-    </div>
+  </div>
+
+  <div class="stat-row" id="statCards">
+    <div class="stat-card active" data-filter="all"><span class="n mono">0</span><span class="l">客戶總數</span></div>
+    <div class="stat-card" data-filter="exported"><span class="n mono" style="color:var(--green-ok);">0</span><span class="l">已匯出</span></div>
+    <div class="stat-card" data-filter="notExported"><span class="n mono" style="color:var(--red-bad);">0</span><span class="l">尚未匯出</span></div>
+    <div class="stat-card" data-filter="notConfigured"><span class="n mono" style="color:var(--red-bad);">0</span><span class="l">尚未設定</span></div>
   </div>
 
   <div class="toolbar">
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="搜尋客戶代號或名稱…">
     </div>
-    <div class="seg" id="statusFilter">
-      <button class="active" data-v="all">全部</button>
-      <button data-v="overdue">已到期未匯出</button>
-      <button data-v="never">尚未匯出過</button>
-      <button data-v="active">有效期內</button>
-    </div>
-    <button class="btn" id="btnResetAll">重置本期匯出狀態</button>
-    <button class="btn" id="btnBatchImport">批次匯入客戶</button>
-    <button class="btn btn-dark" id="btnAddCustomer">＋ 新增客戶</button>
+    <select class="select-filter" id="cycleFilter">
+      <option value="all">全部週期</option>
+      <option value="7天">7天</option>
+      <option value="10天">10天</option>
+      <option value="15天">15天</option>
+      <option value="30天">30天</option>
+    </select>
+    <button class="btn btn-ghost" id="btnResetAll">重置本期匯出狀態</button>
+    <button class="btn btn-secondary" id="btnBatchImport">批次匯入客戶</button>
+    <button class="btn btn-secondary" id="btnBatchQuotes">批次匯入報價單</button>
+    <button class="btn btn-secondary" id="btnAddCustomer">＋ 新增客戶</button>
   </div>
 
   <div class="table-wrap">
     <table id="custTable">
       <thead>
         <tr>
-          <th style="width:110px;">客戶代號</th>
+          <th style="width:100px;">客戶代號</th>
           <th>客戶名稱</th>
           <th style="width:90px;">報價種類</th>
-          <th style="width:170px;">匯出狀態／到期日</th>
-          <th style="width:110px;">欄位範本</th>
-          <th style="width:230px;text-align:right;">操作</th>
+          <th style="width:80px;">報價週期</th>
+          <th style="width:100px;">匯出格式</th>
+          <th style="width:150px;">匯出狀態</th>
+          <th style="width:250px;text-align:right;">操作</th>
         </tr>
       </thead>
       <tbody id="custTbody"></tbody>
@@ -318,6 +335,13 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
     </div>
   </div>
   <div style="text-align:right;margin-top:10px;font-size:11px;color:var(--ink-soft);" class="mono">前端版本 <span id="frontendVersionStamp"></span></div>
+</div>
+
+<!-- 三點選單（共用一個，動態定位） -->
+<div class="row-menu" id="rowMenu">
+  <button data-menu-act="edit">編輯</button>
+  <button data-menu-act="reconfigure">重新設定欄位對應</button>
+  <button data-menu-act="unexport">清除匯出紀錄</button>
 </div>
 
 <!-- ============ 新增/編輯客戶 Modal ============ -->
@@ -344,14 +368,24 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
       <div class="field-row">
         <div class="field">
           <label>報價種類</label>
-          <select id="custQuoteType">
+          <select id="custProductCodeMode">
+            <option value="有貨號">有貨號</option>
+            <option value="無貨號">無貨號</option>
+          </select>
+          <div class="hint">是否有客戶貨號欄位；若「無貨號」，比對品項改用商品名稱</div>
+        </div>
+        <div class="field">
+          <label>報價週期</label>
+          <select id="custQuoteCycle">
             <option value="7天">7天</option>
             <option value="10天">10天</option>
             <option value="15天">15天</option>
             <option value="30天">30天</option>
           </select>
-          <div class="hint">從最近一次匯出日起算，到期日 = 匯出日 + 天數</div>
+          <div class="hint">到期日 = 最後匯出日 + 週期天數</div>
         </div>
+      </div>
+      <div class="field-row">
         <div class="field">
           <label>匯出狀態</label>
           <select id="custExportStatus">
@@ -360,6 +394,7 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
           </select>
           <div class="hint">手動調整時，若切換為「已匯出」會以現在時間重新計算到期日</div>
         </div>
+        <div class="field"></div>
       </div>
     </div>
     <div class="modal-foot">
@@ -392,6 +427,55 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
     <div class="modal-foot">
       <button class="btn btn-ghost" data-close="ovBatch">取消</button>
       <button class="btn btn-primary" id="btnConfirmBatch" disabled>確認匯入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 批次匯入報價單 Modal ============ -->
+<div class="overlay" id="ovBatchQuotes">
+  <div class="modal wide">
+    <div class="modal-head">
+      <div>
+        <h2>批次匯入報價單</h2>
+        <div class="sub">依檔名自動比對「已設定匯出格式」的客戶，一次匯出多家報價單</div>
+      </div>
+      <button class="modal-close" data-close="ovBatchQuotes">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="dropzone" id="batchQuotesDropzone">
+        <strong>點擊選擇多個檔案</strong> 或拖曳多個報價單檔案到此處<br>檔名需包含客戶代號或客戶名稱才能自動辨識
+        <input type="file" id="batchQuotesFileInput" accept=".xlsx,.xls,.csv" multiple style="display:none;">
+      </div>
+      <div id="batchQuotesPreviewWrap" style="margin-top:14px;display:none;">
+        <div class="hint" id="batchQuotesSummary" style="margin-bottom:8px;"></div>
+        <div class="preview-scroll"><table id="batchQuotesPreviewTable"></table></div>
+      </div>
+      <div id="batchQuotesProgressWrap" style="margin-top:14px;display:none;">
+        <div class="hint" id="batchQuotesProgress"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close="ovBatchQuotes">取消</button>
+      <button class="btn btn-export" id="btnConfirmBatchQuotes" disabled>開始批次匯出</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 查看紀錄 Modal ============ -->
+<div class="overlay" id="ovHistory">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h2 id="historyTitle">匯出紀錄</h2>
+        <div class="sub">此客戶最近一次匯出的相關資訊</div>
+      </div>
+      <button class="modal-close" data-close="ovHistory">✕</button>
+    </div>
+    <div class="modal-body">
+      <table class="kv-table" id="historyTable"></table>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close="ovHistory">關閉</button>
     </div>
   </div>
 </div>
@@ -442,7 +526,7 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
       <div style="flex:1;"></div>
       <button class="btn btn-ghost" data-close="ovWizard">取消</button>
       <button class="btn btn-primary" id="wizNext">下一步</button>
-      <button class="btn btn-dark" id="wizExport" style="display:none;">匯出並標記已匯出</button>
+      <button class="btn btn-export" id="wizExport" style="display:none;">匯出並標記已匯出</button>
     </div>
   </div>
 </div>
@@ -450,6 +534,6 @@ tr.no-quote-row td{background:var(--amber-100) !important;color:var(--rust-600) 
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-04-v7"></script>
+<script src="app.js?v=2026-09-05-v8"></script>
 </body>
 </html>
