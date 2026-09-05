@@ -2,10 +2,10 @@
 
 // 請將此網址換成你部署後的 GAS 執行網址（.../exec）
 const GAS_URL = 'https://script.google.com/macros/s/AKfycby6_k1MtdA07FIN26lBYNkoYTpW-Hm4H7bJ4gkVkkCjZvonj7Lz4vKEjvOJV4ybZ2Oc/exec';
-const FRONTEND_VERSION = '2026-09-04-v7';
-const EXPECTED_BACKEND_VERSION = '2026-09-04-v7'; // 要跟 Code.gs 裡的 BACKEND_VERSION 一致
+const FRONTEND_VERSION = '2026-09-05-v8';
+const EXPECTED_BACKEND_VERSION = '2026-09-05-v8'; // 要跟 Code.gs 裡的 BACKEND_VERSION 一致
 
-const TARGET_FIELDS = [
+const TARGET_FIELDS_BASE = [
   { key: '貨號',     label: '客戶貨號 *',   required: true },
   { key: '品名',     label: '客戶商品名稱', required: false },
   { key: '單位',     label: '客戶規格單位', required: false },
@@ -18,6 +18,18 @@ const TARGET_FIELDS = [
   { key: '不報價原因', label: '不報價原因', required: false },
   { key: '變價原因', label: '變價原因',     required: false }
 ];
+// 「無貨號」客戶改用商品名稱當識別欄位；必填標記需要跟著換
+function getTargetFields(productCodeMode) {
+  const noCode = productCodeMode === '無貨號';
+  return TARGET_FIELDS_BASE.map(f => {
+    if (f.key === '貨號') return Object.assign({}, f, { required: !noCode, label: noCode ? '客戶貨號（無則留空）' : '客戶貨號 *' });
+    if (f.key === '品名') return Object.assign({}, f, { required: noCode, label: noCode ? '客戶商品名稱 *' : '客戶商品名稱' });
+    return f;
+  });
+}
+function getIdentityField(productCodeMode) {
+  return productCodeMode === '無貨號' ? '品名' : '貨號';
+}
 
 const OUTPUT_HEADERS = ['*客戶代號','客戶名稱','*客戶貨號','客戶商品名稱','客戶規格單位','*單價','備註','產區/品種','裝箱方式','包裝資材','產地','不報價原因','變價原因'];
 const OUTPUT_FIELD_ORDER = [null, null, '貨號', '品名', '單位', '單價', '備註', '產區品種', '裝箱方式', '包裝資材', '產地', '不報價原因', '變價原因'];
@@ -35,9 +47,9 @@ function formatDateShort(d) {
   if (!d) return '';
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
 }
-// 依「報價種類」與「最後匯出時間」計算到期日與是否已逾期（本期尚未匯出的提醒）
+// 依「報價週期」與「最後匯出時間」計算到期日：never(從沒匯出過) / active(有效期內) / overdue(逾期未匯出)
 function computeDueInfo(c) {
-  const days = QUOTE_CYCLE_DAYS[c.quoteType] || 7;
+  const days = QUOTE_CYCLE_DAYS[c.quoteCycle] || 7;
   const last = parseDateLoose(c.lastExportTime);
   if (!last) return { state: 'never', due: null };
   const due = new Date(last.getTime());
@@ -45,17 +57,24 @@ function computeDueInfo(c) {
   const now = new Date();
   return { state: now >= due ? 'overdue' : 'active', due };
 }
+// 匯出狀態徽章：二元顯示（已匯出/尚未匯出），never 與 overdue 都視為「尚未匯出」
+function computeExportBadge(c) {
+  const info = computeDueInfo(c);
+  if (info.state === 'active') return { label: '已匯出', cls: 'badge-green', due: info.due, overdue: false };
+  return { label: '尚未匯出', cls: 'badge-red', due: info.due, overdue: info.state === 'overdue' };
+}
 
 let state = {
   customers: [],
-  filter: 'all',
+  statFilter: 'all', // all | exported | notExported | notConfigured
+  cycleFilter: 'all', // all | 7天 | 10天 | 15天 | 30天
   search: '',
   wizard: null // 見 openWizard()
 };
 
 /* ---------------- API ---------------- */
-// GET 一律走 JSONP：跨網域（GitHub Pages → Apps Script）直接用 fetch 讀取
-// 在部分瀏覽器/行動裝置環境下會卡住不回應，改用 <script> 標籤讀取可穩定繞過。
+// 一律走 JSONP：跨網域（GitHub Pages → Apps Script）直接用 fetch 讀寫在部分瀏覽器/行動裝置環境下
+// 會卡住不回應，改用 <script> 標籤讀取可穩定繞過（讀取與寫入都走這個管道）。
 function jsonp(url, params) {
   return new Promise((resolve, reject) => {
     const cbName = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
@@ -108,7 +127,6 @@ function apiCall(action, params) {
     throw err;
   });
 }
-// 保留舊名稱相容
 function apiGet(action, params) { return apiCall(action, params); }
 
 async function loadCustomers(showLoading) {
@@ -126,9 +144,7 @@ async function loadCustomers(showLoading) {
   }
 }
 
-// 版本比對：如果後端回傳的版本跟這份前端預期的不一樣，代表 Code.gs 存了檔但沒有「部署新版本」，
-// 或是瀏覽器還在用舊快取的 app.js —— 這是這個專案最常反覆出現的問題成因，直接在畫面上顯示出來，
-// 不用再靠猜的。
+// 版本比對：後端版本跟前端預期不同，代表 Code.gs 沒有部署新版本，或瀏覽器還在用舊快取的 app.js
 let versionWarned = false;
 function checkVersionMismatch(backendVersion) {
   const banner = document.getElementById('versionBanner');
@@ -219,27 +235,137 @@ async function readWorkbookRaw(file) {
   });
 }
 
+/* ---------------- 品項清單（用於比對新增品項） ---------------- */
+async function fetchPreviousCodes(code) {
+  try {
+    const res = await apiCall('getItemCodes', { code });
+    return (res && res.ok && Array.isArray(res.codes)) ? res.codes : [];
+  } catch (err) { return []; }
+}
+
+// 核心轉換：套用欄位對應 + 無單價自動補0 + 與上次匯出比對新增品項，回傳排序後的紀錄陣列
+function buildConvertedRecords(rawRows, dataStartRowIdx, columnMap, productCodeMode, previousCodes) {
+  const identityField = getIdentityField(productCodeMode);
+  const prevSet = new Set(previousCodes || []);
+  const recs = [];
+  for (let r = dataStartRowIdx; r < rawRows.length; r++) {
+    const row = rawRows[r] || [];
+    if (row.every(c => String(c == null ? '' : c).trim() === '')) continue;
+    const rec = {};
+    Object.keys(columnMap).forEach(idxStr => {
+      const idx = +idxStr, field = columnMap[idxStr];
+      let v = row[idx]; v = v == null ? '' : String(v).trim();
+      rec[field] = v;
+    });
+    if (!rec[identityField]) continue;
+    if (!rec['單價'] || !String(rec['單價']).trim()) rec['單價'] = '0'; // 無單價自動補0
+    rec._isNew = prevSet.size > 0 ? !prevSet.has(rec[identityField]) : false;
+    recs.push(rec);
+  }
+  recs.sort((a, b) => (a._isNew === b._isNew) ? 0 : (a._isNew ? 1 : -1));
+  return recs;
+}
+
+async function exportWorkbook(customer, records) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('匯入格式');
+  const FONT_NAME = '微軟正黑體';
+  const FONT_SIZE = 11;
+  const THIN = { style: 'thin', color: { argb: 'FF000000' } };
+  const BORDER = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+
+  const headerRow = ws.addRow(OUTPUT_HEADERS);
+  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    cell.font = { name: FONT_NAME, size: FONT_SIZE };
+    cell.border = BORDER;
+    cell.alignment = { vertical: 'middle', horizontal: colNumber === 3 ? 'left' : undefined };
+  });
+
+  const widths = [12, 16, 12, 26, 14, 10, 16, 14, 14, 14, 10, 14, 14];
+  ws.columns = widths.map(w => ({ width: w }));
+
+  records.forEach(rec => {
+    const priceVal = toNumberIfPossible(rec['單價']);
+    const row = ws.addRow([
+      customer.code,
+      customer.name || '',
+      rec['貨號'] || '',
+      rec['品名'] || '',
+      rec['單位'] || '',
+      priceVal,
+      rec['備註'] || '',
+      rec['產區品種'] || '',
+      rec['裝箱方式'] || '',
+      rec['包裝資材'] || '',
+      rec['產地'] || '',
+      rec['不報價原因'] || '',
+      rec['變價原因'] || ''
+    ]);
+    row.getCell(3).numFmt = '@';
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      cell.font = rec._isNew
+        ? { name: FONT_NAME, size: FONT_SIZE, color: { argb: 'FFFF524D' } }
+        : { name: FONT_NAME, size: FONT_SIZE };
+      cell.border = BORDER;
+      cell.alignment = { vertical: 'middle', horizontal: colNumber === 3 ? 'left' : undefined };
+      if (rec._isNew) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFDE5A' } };
+      }
+    });
+  });
+
+  const buf = await wb.xlsx.writeBuffer();
+  const today = new Date();
+  const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+  const outName = `${customer.code}_${customer.name || ''}_報價單匯入_${stamp}.xlsx`;
+  saveAs(new Blob([buf], { type: 'application/octet-stream' }), outName);
+  return outName;
+}
+
+// 匯出成功後：更新匯出狀態，並把這次的品項識別值存起來供下次比對「新增品項」用。
+// 清單較小時直接跟著 markExported 一起送；太大時（網址長度限制）先標記狀態，再分批 append。
+async function persistExportResult(customer, records, outName) {
+  const identityField = getIdentityField(customer.productCodeMode);
+  const codes = records.map(r => r[identityField]).filter(Boolean);
+  const codesJson = JSON.stringify(codes);
+  let res;
+  if (codesJson.length <= 1400) {
+    res = await apiCall('markExported', { code: customer.code, fileName: outName, itemCount: records.length, itemCodes: codesJson });
+  } else {
+    res = await apiCall('markExported', { code: customer.code, fileName: outName, itemCount: records.length });
+    const CHUNK = 100;
+    for (let i = 0; i < codes.length; i += CHUNK) {
+      const chunk = codes.slice(i, i + CHUNK);
+      await apiCall('appendItemCodes', { code: customer.code, codes: chunk, isFirst: i === 0 });
+    }
+  }
+  return res;
+}
+
 /* ---------------- 統計與表格渲染 ---------------- */
 function renderStats() {
   const total = state.customers.length;
-  let neverN = 0, overdueN = 0, activeN = 0;
+  let exportedN = 0, notExportedN = 0, notConfiguredN = 0;
   state.customers.forEach(c => {
     const info = computeDueInfo(c);
-    if (info.state === 'never') neverN++;
-    else if (info.state === 'overdue') overdueN++;
-    else activeN++;
+    if (info.state === 'active') exportedN++; else notExportedN++;
+    if (!c.mapping) notConfiguredN++;
   });
-  document.getElementById('statTotal').textContent = total;
-  document.getElementById('statPending').textContent = neverN;
-  document.getElementById('statOverdue').textContent = overdueN;
-  document.getElementById('statDone').textContent = activeN;
+  const setN = (sel, v) => { const el = document.querySelector(sel); if (el) el.textContent = v; };
+  setN('#statCards [data-filter="all"] .n', total);
+  setN('#statCards [data-filter="exported"] .n', exportedN);
+  setN('#statCards [data-filter="notExported"] .n', notExportedN);
+  setN('#statCards [data-filter="notConfigured"] .n', notConfiguredN);
 }
 
 function filteredCustomers() {
   const kw = state.search.trim().toLowerCase();
   return state.customers.filter(c => {
-    const st = computeDueInfo(c).state;
-    if (state.filter !== 'all' && st !== state.filter) return false;
+    const info = computeDueInfo(c);
+    if (state.statFilter === 'exported' && info.state !== 'active') return false;
+    if (state.statFilter === 'notExported' && info.state === 'active') return false;
+    if (state.statFilter === 'notConfigured' && c.mapping) return false;
+    if (state.cycleFilter !== 'all' && c.quoteCycle !== state.cycleFilter) return false;
     if (kw && !(String(c.code).toLowerCase().includes(kw) || String(c.name).toLowerCase().includes(kw))) return false;
     return true;
   });
@@ -258,30 +384,25 @@ function renderTable() {
   }
   empty.style.display = 'none';
   tbody.innerHTML = list.map(c => {
-    const info = computeDueInfo(c);
-    let statusCell;
-    if (info.state === 'never') {
-      statusCell = `<span class="badge pending">尚未匯出過</span>`;
-    } else if (info.state === 'overdue') {
-      statusCell = `<span class="badge" style="background:var(--rust-100);color:var(--rust-600);">⚠ 本期已到期未匯出</span>
-        <div class="hint" style="margin-top:3px;">到期日 ${formatDateShort(info.due)}</div>`;
-    } else {
-      statusCell = `<span class="badge done">已匯出</span>
-        <div class="hint" style="margin-top:3px;">下期到期 ${formatDateShort(info.due)}</div>`;
-    }
-    const mapTag = c.mapping
-      ? '<span class="mapping-tag set">✓ 已設定</span>'
-      : '<span class="mapping-tag">未設定</span>';
-    return `<tr${info.state === 'overdue' ? ' style="background:var(--rust-100);"' : ''}>
+    const exp = computeExportBadge(c);
+    const mapSet = !!c.mapping;
+    const mapBadge = mapSet ? `<span class="badge badge-green">已設定</span>` : `<span class="badge badge-red">尚未設定</span>`;
+    const expBadge = `<span class="badge ${exp.cls}">${exp.label}</span>` +
+      (exp.due ? `<div class="hint" style="margin-top:3px;">${exp.overdue ? '⚠ 已逾期 ' : '到期 '}${formatDateShort(exp.due)}</div>` : '');
+    const actionBtn = mapSet
+      ? `<button class="btn small btn-export" data-act="export" data-code="${escapeHtml(c.code)}">匯出報價單</button>`
+      : `<button class="btn small btn-upload" data-act="upload" data-code="${escapeHtml(c.code)}">上傳報價單</button>`;
+    return `<tr>
       <td class="code">${escapeHtml(c.code)}</td>
       <td>${escapeHtml(c.name)}</td>
-      <td class="mono" style="font-size:12.5px;">${escapeHtml(c.quoteType)}</td>
-      <td>${statusCell}</td>
-      <td>${mapTag}</td>
+      <td class="mono" style="font-size:12.5px;">${escapeHtml(c.productCodeMode)}</td>
+      <td class="mono" style="font-size:12.5px;">${escapeHtml(c.quoteCycle)}</td>
+      <td>${mapBadge}</td>
+      <td>${expBadge}</td>
       <td class="actions">
-        <button class="btn small" data-act="upload" data-code="${escapeHtml(c.code)}">上傳報價單</button>
-        <button class="btn small" data-act="edit" data-code="${escapeHtml(c.code)}">編輯</button>
-        ${info.state !== 'never' ? `<button class="btn small" data-act="unexport" data-code="${escapeHtml(c.code)}">清除匯出紀錄</button>` : ''}
+        ${actionBtn}
+        <button class="btn small btn-ghost" data-act="history" data-code="${escapeHtml(c.code)}">查看紀錄</button>
+        <button class="btn-icon" data-act="menu" data-code="${escapeHtml(c.code)}">⋮</button>
       </td>
     </tr>`;
   }).join('');
@@ -305,12 +426,10 @@ document.getElementById('custTbody').addEventListener('click', e => {
   if (!customer) return;
   const act = btn.getAttribute('data-act');
   try {
-    if (act === 'upload') openWizard(customer);
-    else if (act === 'edit') openCustomerModal(customer);
-    else if (act === 'unexport') unexportCustomer(customer);
+    if (act === 'upload' || act === 'export') openWizard(customer);
+    else if (act === 'history') openHistoryModal(customer);
+    else if (act === 'menu') openRowMenu(btn, code);
   } catch (err) {
-    // 避免頁面元素跟程式碼版本不一致時（例如 index.html 沒有更新到最新版）整個按鈕悄悄失效，
-    // 至少跳出提示，而不是使用者點了完全沒反應。
     toast('err', '操作失敗，頁面可能不是最新版本，請重新整理或確認部署檔案是否為最新：' + err.message);
   }
 });
@@ -327,14 +446,86 @@ async function unexportCustomer(customer) {
   finally { setLoading(false); }
 }
 
+async function reconfigureMapping(customer) {
+  if (!confirm(`確定要清除 ${customer.code} 已設定的欄位對應範本嗎？下次上傳時需要重新設定。`)) return;
+  setLoading(true, '清除設定中…');
+  try {
+    const res = await apiCall('clearMapping', { code: customer.code });
+    if (!res.ok) throw new Error(res.error || '清除失敗');
+    upsertCustomer(res.customer);
+    toast('ok', `已清除 ${customer.code} 的欄位對應設定`);
+  } catch (err) { toast('err', err.message); }
+  finally { setLoading(false); }
+}
+
+/* ---------------- 三點選單 ---------------- */
+const rowMenuEl = document.getElementById('rowMenu');
+let rowMenuCode = null;
+function openRowMenu(btn, code) {
+  rowMenuCode = code;
+  const customer = state.customers.find(c => c.code === code);
+  const unexportBtn = rowMenuEl.querySelector('[data-menu-act="unexport"]');
+  const info = customer ? computeDueInfo(customer) : { state: 'never' };
+  if (unexportBtn) unexportBtn.style.display = info.state !== 'never' ? 'block' : 'none';
+  rowMenuEl.style.display = 'flex';
+  const rect = btn.getBoundingClientRect();
+  const menuRect = rowMenuEl.getBoundingClientRect();
+  let top = rect.bottom + 6;
+  if (top + menuRect.height > window.innerHeight) top = rect.top - menuRect.height - 6;
+  let left = rect.right - menuRect.width;
+  if (left < 8) left = 8;
+  rowMenuEl.style.top = top + 'px';
+  rowMenuEl.style.left = left + 'px';
+}
+function closeRowMenu() { rowMenuEl.style.display = 'none'; rowMenuCode = null; }
+document.addEventListener('click', e => {
+  if (e.target.closest('#rowMenu') || e.target.closest('[data-act="menu"]')) return;
+  closeRowMenu();
+});
+rowMenuEl.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-menu-act]');
+  if (!btn || !rowMenuCode) return;
+  const customer = state.customers.find(c => c.code === rowMenuCode);
+  const act = btn.getAttribute('data-menu-act');
+  closeRowMenu();
+  if (!customer) return;
+  if (act === 'edit') openCustomerModal(customer);
+  else if (act === 'reconfigure') reconfigureMapping(customer);
+  else if (act === 'unexport') unexportCustomer(customer);
+});
+
+/* ---------------- 查看紀錄 Modal ---------------- */
+function openHistoryModal(customer) {
+  const info = computeDueInfo(customer);
+  const rows = [
+    ['客戶代號', customer.code],
+    ['客戶名稱', customer.name || '—'],
+    ['報價種類', customer.productCodeMode],
+    ['報價週期', customer.quoteCycle],
+    ['匯出格式', customer.mapping ? '已設定' : '尚未設定'],
+    ['匯出狀態', info.state === 'active' ? '已匯出' : '尚未匯出'],
+    ['最後匯出時間', customer.lastExportTime || '—'],
+    ['最後匯出檔名', customer.lastExportFileName || '—'],
+    ['最後匯出品項數', customer.lastExportItemCount || 0],
+    ['到期日', info.due ? formatDateShort(info.due) : '—']
+  ];
+  document.getElementById('historyTitle').textContent = `匯出紀錄－${customer.code} ${customer.name || ''}`;
+  document.getElementById('historyTable').innerHTML = rows.map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join('');
+  openModal('ovHistory');
+}
+
+/* ---------------- 篩選列（搜尋 / 週期 / 統計卡） ---------------- */
 document.getElementById('searchInput').addEventListener('input', e => {
   state.search = e.target.value; renderTable();
 });
-document.getElementById('statusFilter').addEventListener('click', e => {
-  const btn = e.target.closest('button[data-v]');
-  if (!btn) return;
-  state.filter = btn.getAttribute('data-v');
-  document.querySelectorAll('#statusFilter button').forEach(b => b.classList.toggle('active', b === btn));
+document.getElementById('cycleFilter').addEventListener('change', e => {
+  state.cycleFilter = e.target.value; renderTable();
+});
+document.getElementById('statCards').addEventListener('click', e => {
+  const card = e.target.closest('.stat-card');
+  if (!card) return;
+  state.statFilter = card.getAttribute('data-filter');
+  document.querySelectorAll('#statCards .stat-card').forEach(c => c.classList.toggle('active', c === card));
   renderTable();
 });
 
@@ -360,7 +551,8 @@ function openCustomerModal(customer) {
   setVal('custCode', customer ? customer.code : '');
   document.getElementById('custCode').disabled = !!customer;
   setVal('custName', customer ? customer.name : '');
-  setVal('custQuoteType', customer ? customer.quoteType : '7天');
+  setVal('custProductCodeMode', customer ? customer.productCodeMode : '有貨號');
+  setVal('custQuoteCycle', customer ? customer.quoteCycle : '7天');
   setVal('custExportStatus', customer ? (customer.exportStatus === '已匯出' ? '已匯出' : '未匯出') : '未匯出');
   openModal('ovCustomer');
 }
@@ -375,7 +567,8 @@ document.getElementById('btnSaveCustomer').addEventListener('click', async () =>
     const res = await apiCall('saveCustomer', {
       customer: {
         code, name,
-        quoteType: document.getElementById('custQuoteType').value,
+        productCodeMode: document.getElementById('custProductCodeMode').value,
+        quoteCycle: document.getElementById('custQuoteCycle').value,
         exportStatus: document.getElementById('custExportStatus').value
       }
     });
@@ -397,6 +590,15 @@ function setupDropzone(zoneId, inputId, onFile) {
   ['dragenter', 'dragover'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.add('drag'); }));
   ['dragleave', 'drop'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.remove('drag'); }));
   zone.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) onFile(f); });
+}
+function setupMultiDropzone(zoneId, inputId, onFiles) {
+  const zone = document.getElementById(zoneId);
+  const input = document.getElementById(inputId);
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => { if (input.files.length) onFiles(Array.from(input.files)); });
+  ['dragenter', 'dragover'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.add('drag'); }));
+  ['dragleave', 'drop'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.remove('drag'); }));
+  zone.addEventListener('drop', e => { const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []); if (files.length) onFiles(files); });
 }
 
 setupDropzone('batchDropzone', 'batchFileInput', async file => {
@@ -425,7 +627,7 @@ setupDropzone('batchDropzone', 'batchFileInput', async file => {
 });
 
 document.getElementById('btnBatchImport').addEventListener('click', () => {
-  ensureXLSX(); // 提前背景載入，讓使用者選檔案時已經準備好
+  ensureXLSX();
   batchParsed = [];
   document.getElementById('batchPreviewWrap').style.display = 'none';
   document.getElementById('batchFileInput').value = '';
@@ -437,7 +639,6 @@ document.getElementById('btnConfirmBatch').addEventListener('click', async () =>
   if (!batchParsed.length) return;
   setLoading(true, '匯入客戶中…');
   try {
-    // 走 GET/JSONP 有網址長度限制，客戶數量多時分批送出，避免超過瀏覽器網址長度上限
     const CHUNK = 60;
     let lastRes = null;
     for (let i = 0; i < batchParsed.length; i += CHUNK) {
@@ -453,6 +654,91 @@ document.getElementById('btnConfirmBatch').addEventListener('click', async () =>
   finally { setLoading(false); }
 });
 
+/* ---------------- 批次匯入報價單（依檔名比對客戶） ---------------- */
+let batchQuotesFiles = [];
+function matchCustomersByFilename(filename) {
+  const configured = state.customers.filter(c => c.mapping);
+  const lower = filename.toLowerCase();
+  return configured.filter(c => {
+    const codeHit = c.code && lower.includes(String(c.code).toLowerCase());
+    const nameHit = c.name && c.name.trim() && lower.includes(c.name.trim().toLowerCase());
+    return codeHit || nameHit;
+  });
+}
+
+document.getElementById('btnBatchQuotes').addEventListener('click', () => {
+  ensureXLSX();
+  batchQuotesFiles = [];
+  document.getElementById('batchQuotesPreviewWrap').style.display = 'none';
+  document.getElementById('batchQuotesProgressWrap').style.display = 'none';
+  document.getElementById('batchQuotesFileInput').value = '';
+  document.getElementById('btnConfirmBatchQuotes').disabled = true;
+  openModal('ovBatchQuotes');
+});
+
+setupMultiDropzone('batchQuotesDropzone', 'batchQuotesFileInput', files => {
+  batchQuotesFiles = files.map(file => {
+    const matches = matchCustomersByFilename(file.name);
+    let status, customer = null;
+    if (matches.length === 1) { status = 'matched'; customer = matches[0]; }
+    else if (matches.length === 0) { status = 'unmatched'; }
+    else { status = 'ambiguous'; }
+    return { file, matches, status, customer };
+  });
+  renderBatchQuotesPreview();
+});
+
+function renderBatchQuotesPreview() {
+  const okCount = batchQuotesFiles.filter(f => f.status === 'matched').length;
+  document.getElementById('batchQuotesSummary').textContent = `共 ${batchQuotesFiles.length} 個檔案，可辨識並匯出 ${okCount} 筆`;
+  const table = document.getElementById('batchQuotesPreviewTable');
+  table.innerHTML = '<thead><tr><th>檔案名稱</th><th>比對到的客戶</th><th>狀態</th></tr></thead><tbody>' +
+    batchQuotesFiles.map(f => {
+      let matchText, statusText;
+      if (f.status === 'matched') { matchText = `${f.customer.code} ${f.customer.name || ''}`; statusText = '<span class="badge badge-green">可匯出</span>'; }
+      else if (f.status === 'unmatched') { matchText = '—'; statusText = '<span class="badge badge-red">找不到相符客戶</span>'; }
+      else { matchText = f.matches.map(m => m.code).join('、'); statusText = '<span class="badge badge-red">比對到多個客戶</span>'; }
+      return `<tr><td>${escapeHtml(f.file.name)}</td><td>${escapeHtml(matchText)}</td><td>${statusText}</td></tr>`;
+    }).join('') + '</tbody>';
+  document.getElementById('batchQuotesPreviewWrap').style.display = 'block';
+  document.getElementById('btnConfirmBatchQuotes').disabled = okCount === 0;
+}
+
+document.getElementById('btnConfirmBatchQuotes').addEventListener('click', async () => {
+  const jobs = batchQuotesFiles.filter(f => f.status === 'matched');
+  if (!jobs.length) return;
+  document.getElementById('batchQuotesProgressWrap').style.display = 'block';
+  document.getElementById('btnConfirmBatchQuotes').disabled = true;
+  let okN = 0, failN = 0;
+  const failLog = [];
+  try {
+    await ensureExcelJS();
+    for (let i = 0; i < jobs.length; i++) {
+      const job = jobs[i];
+      document.getElementById('batchQuotesProgress').textContent = `處理中 ${i + 1}/${jobs.length}：${job.customer.code} ${job.customer.name || ''}`;
+      try {
+        const { rows } = await readWorkbookRaw(job.file);
+        const previousCodes = await fetchPreviousCodes(job.customer.code);
+        const records = buildConvertedRecords(rows, job.customer.mapping.dataStartRowIdx, job.customer.mapping.columnMap, job.customer.productCodeMode, previousCodes);
+        if (!records.length) throw new Error('沒有解析到任何品項，請確認欄位對應是否仍然正確');
+        const outName = await exportWorkbook(job.customer, records);
+        const res = await persistExportResult(job.customer, records, outName);
+        if (!res.ok) throw new Error(res.error || '更新狀態失敗');
+        upsertCustomer(res.customer);
+        okN++;
+      } catch (err) {
+        failN++;
+        failLog.push(`${job.customer.code}：${err.message}`);
+      }
+    }
+  } finally {
+    document.getElementById('batchQuotesProgress').textContent =
+      `完成：成功 ${okN} 筆，失敗 ${failN} 筆${failLog.length ? '（' + failLog.join('；') + '）' : ''}`;
+    document.getElementById('btnConfirmBatchQuotes').disabled = false;
+    toast(failN ? 'err' : 'ok', `批次匯出完成：成功 ${okN} 筆${failN ? ('，失敗 ' + failN + ' 筆') : ''}`);
+  }
+});
+
 /* ---------------- 上傳報價單精靈 ---------------- */
 function colLetter(i) {
   let s = ''; i++;
@@ -461,17 +747,17 @@ function colLetter(i) {
 }
 
 function openWizard(customer) {
-  state.wizard = { customer, rawRows: null, dataStartRowIdx: null, columnMap: {}, numCols: 0, convertedRecords: [], step: 1, usingSaved: false, fileName: '' };
-  document.getElementById('wizardTitle').textContent = `上傳報價單 － ${customer.code} ${customer.name || ''}`;
+  state.wizard = { customer, rawRows: null, dataStartRowIdx: null, columnMap: {}, numCols: 0, convertedRecords: [], step: 1, usingSaved: false, fileName: '', previousCodes: [], isFirstEverExport: true };
+  document.getElementById('wizardTitle').textContent = `${customer.mapping ? '匯出報價單' : '上傳報價單'} － ${customer.code} ${customer.name || ''}`;
   document.getElementById('wizardSub').textContent = customer.mapping
-    ? '此客戶已設定欄位對應範本，上傳後將自動套用'
+    ? '此客戶已設定欄位對應範本，上傳後將自動套用並匯出'
     : '首次上傳此客戶的報價單，需要設定欄位對應（之後可自動套用）';
   document.getElementById('wizFileInput').value = '';
   document.getElementById('wizSaveMapping').checked = true;
   goToWizStep(1);
   openModal('ovWizard');
-  ensureXLSX(); // 提前背景載入解析用函式庫
-  ensureExcelJS(); // 提前背景載入匯出用函式庫，避免到第3步才等待下載
+  ensureXLSX();
+  ensureExcelJS();
 }
 
 function goToWizStep(n) {
@@ -490,9 +776,14 @@ function goToWizStep(n) {
 setupDropzone('wizDropzone', 'wizFileInput', async file => {
   try {
     setLoading(true, '解析檔案中…');
-    const { rows } = await readWorkbookRaw(file);
+    const [{ rows }, previousCodes] = await Promise.all([
+      readWorkbookRaw(file),
+      fetchPreviousCodes(state.wizard.customer.code)
+    ]);
     state.wizard.rawRows = rows;
     state.wizard.fileName = file.name;
+    state.wizard.previousCodes = previousCodes;
+    state.wizard.isFirstEverExport = !previousCodes.length;
     setLoading(false);
     if (!rows.length) { toast('err', '檔案沒有資料'); return; }
     const customer = state.wizard.customer;
@@ -520,17 +811,23 @@ setupDropzone('wizDropzone', 'wizFileInput', async file => {
   } catch (err) { setLoading(false); toast('err', '解析失敗：' + err.message); }
 });
 
-function guessHeaderRowIdx(rows) {
+function guessHeaderRowIdx(rows, productCodeMode) {
+  const noCode = productCodeMode === '無貨號';
   for (let i = 0; i < Math.min(20, rows.length); i++) {
     const line = (rows[i] || []).join('');
-    if (/單價/.test(line) && /(貨號|品號|產品編號|品名)/.test(line)) return i;
+    if (noCode) {
+      if (/單價/.test(line) && /(品名|規格|名稱)/.test(line)) return i;
+    } else {
+      if (/單價/.test(line) && /(貨號|品號|產品編號|品名)/.test(line)) return i;
+    }
   }
   return -1;
 }
 
 function renderMappingStep() {
   const rows = state.wizard.rawRows;
-  const headerGuessIdx = guessHeaderRowIdx(rows);
+  const productCodeMode = state.wizard.customer.productCodeMode;
+  const headerGuessIdx = guessHeaderRowIdx(rows, productCodeMode);
   if (state.wizard.dataStartRowIdx == null) {
     state.wizard.dataStartRowIdx = headerGuessIdx >= 0 ? headerGuessIdx + 1 : 0;
   }
@@ -580,6 +877,7 @@ function renderMapGrid() {
   const sampleRowIdx = state.wizard.dataStartRowIdx != null ? state.wizard.dataStartRowIdx : 0;
   const sampleRow = rows[sampleRowIdx] || [];
   const n = state.wizard.numCols;
+  const targetFields = getTargetFields(state.wizard.customer.productCodeMode);
   const grid = document.getElementById('wizMapGrid');
   let html = '';
   for (let i = 0; i < n; i++) {
@@ -590,7 +888,7 @@ function renderMapGrid() {
       <div class="col-sample" title="${escapeHtml(sample)}">${escapeHtml(sample) || '（空）'}</div>
       <select data-col-idx="${i}" class="mapSelect">
         <option value="">（不使用）</option>
-        ${TARGET_FIELDS.map(f => `<option value="${f.key}" ${current === f.key ? 'selected' : ''}>${f.label}</option>`).join('')}
+        ${targetFields.map(f => `<option value="${f.key}" ${current === f.key ? 'selected' : ''}>${f.label}</option>`).join('')}
       </select>
     </div>`;
   }
@@ -604,34 +902,23 @@ function renderMapGrid() {
 }
 
 function computeConverted() {
-  const { rawRows, dataStartRowIdx, columnMap } = state.wizard;
-  const recs = [];
-  for (let r = dataStartRowIdx; r < rawRows.length; r++) {
-    const row = rawRows[r] || [];
-    if (row.every(c => String(c == null ? '' : c).trim() === '')) continue;
-    const rec = {};
-    Object.keys(columnMap).forEach(idxStr => {
-      const idx = +idxStr, field = columnMap[idxStr];
-      let v = row[idx]; v = v == null ? '' : String(v).trim();
-      rec[field] = v;
-    });
-    if (!rec['貨號']) continue;
-    rec._noQuote = !(rec['單價'] && rec['單價'].trim() !== '');
-    recs.push(rec);
-  }
-  recs.sort((a, b) => (a._noQuote === b._noQuote) ? 0 : (a._noQuote ? 1 : -1));
-  state.wizard.convertedRecords = recs;
+  const { rawRows, dataStartRowIdx, columnMap, customer, previousCodes } = state.wizard;
+  state.wizard.convertedRecords = buildConvertedRecords(rawRows, dataStartRowIdx, columnMap, customer.productCodeMode, previousCodes);
 }
 
 function renderResultStep() {
   const recs = state.wizard.convertedRecords;
   const total = recs.length;
-  const noQuote = recs.filter(r => r._noQuote).length;
-  document.getElementById('wizResultSummary').innerHTML = `
-    <div class="pill ok">共 ${total} 項</div>
-    <div class="pill">正常報價 ${total - noQuote} 項</div>
-    ${noQuote ? `<div class="pill warn">無報價 ${noQuote} 項（匯出時以黃底紅字標示並排至最後）</div>` : ''}
-  `;
+  const newCount = recs.filter(r => r._isNew).length;
+  let extraPill;
+  if (state.wizard.isFirstEverExport) {
+    extraPill = `<div class="pill">首次匯出，之後上傳可自動比對新增品項</div>`;
+  } else if (newCount) {
+    extraPill = `<div class="pill warn">新增品項 ${newCount} 項（與上次匯出比較，黃底紅字並排至最後）</div>`;
+  } else {
+    extraPill = `<div class="pill">與上次匯出比較，沒有新增品項</div>`;
+  }
+  document.getElementById('wizResultSummary').innerHTML = `<div class="pill ok">共 ${total} 項</div>${extraPill}`;
   const table = document.getElementById('wizResultPreviewTable');
   const customer = state.wizard.customer;
   const thead = '<thead><tr>' + OUTPUT_HEADERS.map(h => `<th>${h}</th>`).join('') + '</tr></thead>';
@@ -643,7 +930,7 @@ function renderResultStep() {
       else v = rec[f] || '';
       return `<td>${escapeHtml(v)}</td>`;
     }).join('');
-    return `<tr class="${rec._noQuote ? 'no-quote-row' : ''}">${cells}</tr>`;
+    return `<tr class="${rec._isNew ? 'new-item-row' : ''}">${cells}</tr>`;
   }).join('') + '</tbody>';
   table.innerHTML = thead + body;
 }
@@ -657,7 +944,8 @@ document.getElementById('wizNext').addEventListener('click', () => {
     goToWizStep(2);
   } else if (step === 2) {
     const assignedFields = new Set(Object.values(state.wizard.columnMap));
-    const missing = TARGET_FIELDS.filter(f => f.required && !assignedFields.has(f.key));
+    const targetFields = getTargetFields(state.wizard.customer.productCodeMode);
+    const missing = targetFields.filter(f => f.required && !assignedFields.has(f.key));
     if (missing.length) { toast('err', '請先設定：' + missing.map(f => f.label).join('、')); return; }
     computeConverted();
     if (!state.wizard.convertedRecords.length) { toast('err', '依目前設定沒有解析到任何品項，請確認起始列與欄位對應'); return; }
@@ -691,62 +979,6 @@ async function saveMappingForCustomer() {
   } catch (err) { /* 靜默失敗，不影響匯出流程 */ }
 }
 
-async function exportWorkbook(customer, records) {
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('匯入格式');
-  const FONT_NAME = '微軟正黑體';
-  const FONT_SIZE = 11;
-  const THIN = { style: 'thin', color: { argb: 'FF000000' } };
-  const BORDER = { top: THIN, bottom: THIN, left: THIN, right: THIN };
-
-  const headerRow = ws.addRow(OUTPUT_HEADERS);
-  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    cell.font = { name: FONT_NAME, size: FONT_SIZE };
-    cell.border = BORDER;
-    cell.alignment = { vertical: 'middle', horizontal: colNumber === 3 ? 'left' : undefined };
-  });
-
-  const widths = [12, 16, 12, 26, 14, 10, 16, 14, 14, 14, 10, 14, 14];
-  ws.columns = widths.map(w => ({ width: w }));
-
-  records.forEach(rec => {
-    const priceVal = rec._noQuote ? null : toNumberIfPossible(rec['單價']);
-    const row = ws.addRow([
-      customer.code,
-      customer.name || '',
-      rec['貨號'] || '',
-      rec['品名'] || '',
-      rec['單位'] || '',
-      priceVal,
-      rec['備註'] || '',
-      rec['產區品種'] || '',
-      rec['裝箱方式'] || '',
-      rec['包裝資材'] || '',
-      rec['產地'] || '',
-      rec['不報價原因'] || '',
-      rec['變價原因'] || ''
-    ]);
-    row.getCell(3).numFmt = '@';
-    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      cell.font = rec._noQuote
-        ? { name: FONT_NAME, size: FONT_SIZE, color: { argb: 'FFA5432C' } }
-        : { name: FONT_NAME, size: FONT_SIZE };
-      cell.border = BORDER;
-      cell.alignment = { vertical: 'middle', horizontal: colNumber === 3 ? 'left' : undefined };
-      if (rec._noQuote) {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE8B2' } };
-      }
-    });
-  });
-
-  const buf = await wb.xlsx.writeBuffer();
-  const today = new Date();
-  const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
-  const outName = `${customer.code}_${customer.name || ''}_報價單匯入_${stamp}.xlsx`;
-  saveAs(new Blob([buf], { type: 'application/octet-stream' }), outName);
-  return outName;
-}
-
 document.getElementById('wizExport').addEventListener('click', async () => {
   const { customer, convertedRecords } = state.wizard;
   if (!convertedRecords.length) return;
@@ -763,7 +995,7 @@ document.getElementById('wizExport').addEventListener('click', async () => {
   }
   setLoading(true, '更新匯出狀態…');
   try {
-    const res = await apiCall('markExported', { code: customer.code, fileName: outName, itemCount: convertedRecords.length });
+    const res = await persistExportResult(customer, convertedRecords, outName);
     if (!res.ok) throw new Error(res.error || '更新狀態失敗');
     upsertCustomer(res.customer);
     closeModal('ovWizard');
