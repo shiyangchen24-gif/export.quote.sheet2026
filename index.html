@@ -74,6 +74,14 @@ input,select{font-family:inherit;}
 .brand-mark p{margin:2px 0 0;font-size:12.5px;color:var(--ink-soft);}
 
 /* 統計卡（可點擊篩選） */
+.tab-row{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--line);}
+.tab-btn{
+  border:none;background:transparent;padding:10px 4px;margin-right:18px;font-size:14px;font-weight:600;
+  color:var(--ink-soft);border-bottom:2.5px solid transparent;margin-bottom:-1px;
+}
+.tab-btn:hover{color:var(--ink);}
+.tab-btn.active{color:var(--leaf-700);border-bottom-color:var(--leaf-600);}
+
 .stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;}
 .stat-card{
   background:#fff;border:1.5px solid var(--line);border-radius:10px;
@@ -256,6 +264,7 @@ td.actions .btn,td.actions .btn-icon{margin-left:6px;}
 .pill.warn{background:#fff4cf;color:#8a6d17;}
 
 tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-bad) !important;font-weight:500;}
+tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !important;font-weight:500;}
 
 .kv-table{width:100%;border-collapse:collapse;font-size:13.5px;}
 .kv-table td{padding:8px 4px;border-bottom:1px solid var(--paper-200);}
@@ -303,6 +312,19 @@ tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-
     </div>
   </div>
 
+  <div class="tab-row" id="tabRow">
+    <button class="tab-btn active" data-tab="hasCode">有貨號客戶</button>
+    <button class="tab-btn" data-tab="noCode">無貨號客戶</button>
+  </div>
+
+  <div id="masterItemsPanel" style="display:none;align-items:center;gap:12px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:16px;">
+    <div style="flex:1;">
+      <div style="font-weight:700;font-size:13.5px;">忠欣品項主檔（全公司共用）</div>
+      <div class="hint">無貨號客戶的品項比對，都是拿客戶的料號對照表去對這份主檔的料號。目前共 <span id="masterItemsCount" class="mono">0</span> 筆。</div>
+    </div>
+    <button class="btn btn-secondary" id="btnMasterItems">上傳／更新主檔</button>
+  </div>
+
   <div class="stat-row" id="statCards">
     <div class="stat-card active" data-filter="all"><span class="n mono">0</span><span class="l">客戶總數</span></div>
     <div class="stat-card" data-filter="exported"><span class="n mono" style="color:var(--green-ok);">0</span><span class="l">已匯出</span></div>
@@ -322,7 +344,7 @@ tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-
 
   <div class="table-wrap">
     <table id="custTable">
-      <thead>
+      <thead id="tableHead">
         <tr>
           <th style="width:110px;">客戶代號</th>
           <th>客戶名稱</th>
@@ -498,6 +520,60 @@ tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-
   </div>
 </div>
 
+<!-- ============ 忠欣品項主檔 上傳/更新 Modal ============ -->
+<div class="overlay" id="ovMasterItems">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h2>忠欣品項主檔</h2>
+        <div class="sub">全公司共用，料號的正式來源；上傳會整份取代目前的主檔</div>
+      </div>
+      <button class="modal-close" data-close="ovMasterItems">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="dropzone" id="masterItemsDropzone">
+        <strong>點擊選擇檔案</strong> 或拖曳 Excel 檔案到此處<br>第一列為標題，需包含「料號」「品項名稱」「單位」欄位
+        <input type="file" id="masterItemsFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
+      </div>
+      <div id="masterItemsPreviewWrap" style="margin-top:14px;display:none;">
+        <div class="hint" id="masterItemsSummary" style="margin-bottom:8px;"></div>
+        <div class="preview-scroll"><table id="masterItemsPreviewTable"></table></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close="ovMasterItems">取消</button>
+      <button class="btn btn-primary" id="btnConfirmMasterItems" disabled>確認匯入（整份取代）</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 客戶料號對照表 上傳 Modal ============ -->
+<div class="overlay" id="ovLookup">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h2 id="lookupTitle">上傳料號對照表</h2>
+        <div class="sub">這個客戶自己的「客戶品名 → 忠欣料號」對照表；上傳會整份取代</div>
+      </div>
+      <button class="modal-close" data-close="ovLookup">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="dropzone" id="lookupDropzone">
+        <strong>點擊選擇檔案</strong> 或拖曳 Excel 檔案到此處<br>第一列為標題，需包含「客戶品名」「料號」欄位
+        <input type="file" id="lookupFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
+      </div>
+      <div id="lookupPreviewWrap" style="margin-top:14px;display:none;">
+        <div class="hint" id="lookupSummary" style="margin-bottom:8px;"></div>
+        <div class="preview-scroll"><table id="lookupPreviewTable"></table></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close="ovLookup">取消</button>
+      <button class="btn btn-primary" id="btnConfirmLookup" disabled>確認匯入（整份取代）</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ 上傳報價單 / 對應精靈 Modal ============ -->
 <div class="overlay" id="ovWizard">
   <div class="modal wide">
@@ -552,6 +628,6 @@ tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-07-supabase-v2"></script>
+<script src="app.js?v=2026-09-08-supabase-v3"></script>
 </body>
 </html>
