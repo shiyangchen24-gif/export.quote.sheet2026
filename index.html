@@ -7,6 +7,8 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj4KPHJlY3QgeD0iMTYiIHk9IjgiIHdpZHRoPSI0ODAiIGhlaWdodD0iNDk2IiByeD0iMTQwIiBmaWxsPSIjMUY3QTNEIi8+CjxyZWN0IHg9IjEyOCIgeT0iODAiIHdpZHRoPSI5NiIgaGVpZ2h0PSI5NiIgcng9IjI2IiBmaWxsPSIjZmZmZmZmIi8+CjxyZWN0IHg9IjEyOCIgeT0iMjA4IiB3aWR0aD0iOTYiIGhlaWdodD0iOTYiIHJ4PSIyNiIgZmlsbD0iI2ZmZmZmZiIvPgo8cmVjdCB4PSIxMjgiIHk9IjMzNiIgd2lkdGg9Ijk2IiBoZWlnaHQ9Ijk2IiByeD0iMjYiIGZpbGw9IiNmZmZmZmYiLz4KPHJlY3QgeD0iMjYwIiB5PSIxMDQiIHdpZHRoPSIxMjgiIGhlaWdodD0iNDgiIHJ4PSIyNCIgZmlsbD0iI2ZmZmZmZiIvPgo8cmVjdCB4PSIyNjAiIHk9IjIzMiIgd2lkdGg9IjEyOCIgaGVpZ2h0PSI0OCIgcng9IjI0IiBmaWxsPSIjZmZmZmZmIi8+CjxyZWN0IHg9IjI2MCIgeT0iMzYwIiB3aWR0aD0iMTI4IiBoZWlnaHQ9IjQ4IiByeD0iMjQiIGZpbGw9IiNmZmZmZmYiLz4KPC9zdmc+Cg==">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Supabase 用戶端函式庫：核心資料存取都要用到，直接載入（不像 xlsx/exceljs 只有特定操作才需要） -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <!-- xlsx / exceljs / FileSaver 改由 app.js 依需要時才動態載入，避免拖慢首次進站速度 -->
 <style>
 :root{
@@ -289,9 +291,6 @@ tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-
 <body>
 
 <div class="shell">
-  <div id="versionBanner" style="display:none;align-items:flex-start;gap:10px;background:var(--rust-100);color:var(--rust-600);border:1px solid var(--rust-600);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:13px;line-height:1.6;">
-    <span style="flex:1;"></span>
-  </div>
   <div class="topbar">
     <div class="brand-mark">
       <div class="glyph">
@@ -553,6 +552,6 @@ tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-06-v10"></script>
+<script src="app.js?v=2026-09-07-supabase-v1"></script>
 </body>
 </html>
