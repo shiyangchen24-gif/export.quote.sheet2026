@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-08-supabase-v3';
+const FRONTEND_VERSION = '2026-09-09-supabase-v4';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -980,18 +980,28 @@ setupDropzone('batchDropzone', 'batchFileInput', async file => {
     const headerRow = rows[0].map(h => String(h || '').trim());
     const codeIdx = headerRow.findIndex(h => h.includes('客戶代號') || h.includes('代號'));
     const nameIdx = headerRow.findIndex(h => h.includes('客戶名稱') || h.includes('名稱'));
+    const modeIdx = headerRow.findIndex(h => h.includes('報價種類') || h.includes('種類'));
+    const cycleIdx = headerRow.findIndex(h => h.includes('報價週期') || h.includes('週期'));
+    const statusIdx = headerRow.findIndex(h => h.includes('匯出狀態'));
     if (codeIdx === -1) { toast('err', '找不到「客戶代號」欄位，請確認第一列為標題列'); return; }
     batchParsed = [];
     for (let i = 1; i < rows.length; i++) {
       const code = String(rows[i][codeIdx] || '').trim();
       if (!code) continue;
       const name = nameIdx > -1 ? String(rows[i][nameIdx] || '').trim() : '';
-      batchParsed.push({ code, name });
+      const modeRaw = modeIdx > -1 ? String(rows[i][modeIdx] || '').trim() : '';
+      const cycleRaw = cycleIdx > -1 ? String(rows[i][cycleIdx] || '').trim() : '';
+      const statusRaw = statusIdx > -1 ? String(rows[i][statusIdx] || '').trim() : '';
+      const productCodeMode = modeRaw === '無貨號' ? '無貨號' : '有貨號';
+      const quoteCycle = ['7天', '10天', '15天', '30天'].includes(cycleRaw) ? cycleRaw : '7天';
+      const exportStatus = statusRaw === '已匯出' ? '已匯出' : '未匯出'; // 「尚未匯出」「未匯出」或空白都視為未匯出
+      batchParsed.push({ code, name, productCodeMode, quoteCycle, exportStatus });
     }
-    document.getElementById('batchSummary').textContent = `辨識到 ${batchParsed.length} 筆客戶資料，確認後將新增或更新客戶主檔`;
+    document.getElementById('batchSummary').textContent = `辨識到 ${batchParsed.length} 筆客戶資料，確認後將新增或更新客戶主檔` +
+      (modeIdx === -1 || cycleIdx === -1 || statusIdx === -1 ? '（檔案缺少部分欄位，缺的部分會用預設值：有貨號／7天／尚未匯出）' : '');
     const table = document.getElementById('batchPreviewTable');
-    table.innerHTML = '<thead><tr><th>客戶代號</th><th>客戶名稱</th></tr></thead><tbody>' +
-      batchParsed.slice(0, 200).map(c => `<tr><td class="mono">${escapeHtml(c.code)}</td><td>${escapeHtml(c.name)}</td></tr>`).join('') +
+    table.innerHTML = '<thead><tr><th>客戶代號</th><th>客戶名稱</th><th>報價種類</th><th>報價週期</th><th>匯出狀態</th></tr></thead><tbody>' +
+      batchParsed.slice(0, 200).map(c => `<tr><td class="mono">${escapeHtml(c.code)}</td><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.productCodeMode)}</td><td>${escapeHtml(c.quoteCycle)}</td><td>${escapeHtml(c.exportStatus === '已匯出' ? '已匯出' : '尚未匯出')}</td></tr>`).join('') +
       '</tbody>';
     document.getElementById('batchPreviewWrap').style.display = 'block';
     document.getElementById('btnConfirmBatch').disabled = batchParsed.length === 0;
@@ -1012,6 +1022,7 @@ document.getElementById('btnConfirmBatch').addEventListener('click', async () =>
   setLoading(true, '匯入客戶中…');
   try {
     assertSb();
+    const nowIso = new Date().toISOString();
     // Postgres 的 upsert 沒有 GAS 網址長度那種限制，可以一次送一大批；
     // 這裡仍保留適度分批（300 筆一批）純粹是避免單次請求過大，不是為了繞過什麼限制。
     const CHUNK = 300;
@@ -1019,8 +1030,18 @@ document.getElementById('btnConfirmBatch').addEventListener('click', async () =>
     for (let i = 0; i < batchParsed.length; i += CHUNK) {
       const chunk = batchParsed.slice(i, i + CHUNK);
       setLoading(true, `匯入客戶中… (${Math.min(i + CHUNK, batchParsed.length)}/${batchParsed.length})`);
-      const payload = chunk.map(c => ({ code: c.code, name: c.name }));
-      const { data, error } = await sb.from('customers').upsert(payload, { onConflict: 'code' }).select();
+      const payload = chunk.map(c => ({
+        code: c.code,
+        name: c.name,
+        product_code_mode: c.productCodeMode,
+        quote_cycle: c.quoteCycle,
+        export_status: c.exportStatus,
+        // 檔案沒有實際匯出時間可用，「已匯出」就用現在時間起算到期日；重複匯入同一批已匯出的客戶
+        // 會讓到期日重新起算，這是這個批次匯入工具的已知取捨（主要設計給初次建立客戶清單用）
+        last_export_time: c.exportStatus === '已匯出' ? nowIso : null,
+        updated_at: nowIso
+      }));
+      const { data, error } = await sb.from('customers').upsert(payload, { onConflict: 'code' }).select('code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count');
       if (error) throw new Error(error.message);
       allRows.push(...(data || []));
     }
