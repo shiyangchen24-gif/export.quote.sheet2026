@@ -1,19 +1,53 @@
 /* ===================== 報價單匯出系統 - 前端邏輯（Supabase 版） ===================== */
 
 // 請填入你的 Supabase 專案資訊：Supabase 後台 →「Project Settings」→「API」
-//   - SUPABASE_URL：例如 https://abcdefghijklmnop.supabase.co
+//   - SUPABASE_URL：例如 https://abcdefghijklmnop.supabase.co（結尾不要加斜線 /，也不要自己加 /rest/v1 之類的路徑）
 //   - SUPABASE_ANON_KEY：「Project API keys」裡的 anon / public key（不是 service_role！）
 // 這把 anon key 之後會直接出現在網頁原始碼裡，這是正常且必要的（前端本來就要用它連線），
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
-const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co/rest/v1/';
+const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-07-supabase-v1';
+const FRONTEND_VERSION = '2026-09-07-supabase-v2';
 
-const sb = (typeof supabase !== 'undefined' && SUPABASE_URL.indexOf('YOUR_SUPABASE_URL') !== 0 && SUPABASE_ANON_KEY.indexOf('YOUR_SUPABASE_ANON_KEY') !== 0)
-  ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  : null;
+// 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
+// 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
+// 斜線、引號，或是把 anon key 貼錯欄位，都可能造成 Supabase 用戶端內部組網址失敗，
+// 出現「Invalid path specified in request URL」這種不容易懂的錯誤，所以這裡先擋掉。
+function isConfiguredSupabaseUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  if (url.indexOf('YOUR_SUPABASE_URL') !== -1) return false;
+  const trimmed = url.trim();
+  if (trimmed !== url) return false; // 前後有多餘空白，代表複製貼上時可能出錯
+  try {
+    const u = new URL(trimmed);
+    return u.protocol === 'https:' && u.hostname.length > 3 && (u.pathname === '' || u.pathname === '/');
+  } catch (e) { return false; }
+}
+function isConfiguredSupabaseKey(key) {
+  if (!key || typeof key !== 'string') return false;
+  if (key.indexOf('YOUR_SUPABASE_ANON_KEY') !== -1) return false;
+  return key.trim() === key && key.length > 20;
+}
+
+const _sbConfigOk = typeof supabase !== 'undefined' && isConfiguredSupabaseUrl(SUPABASE_URL) && isConfiguredSupabaseKey(SUPABASE_ANON_KEY);
+let sb = null;
+let sbInitError = '';
+if (_sbConfigOk) {
+  try {
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  } catch (err) {
+    sbInitError = 'Supabase 用戶端建立失敗：' + err.message + '（請確認 SUPABASE_URL／SUPABASE_ANON_KEY 是否貼對、貼完整）';
+  }
+} else if (typeof supabase === 'undefined') {
+  sbInitError = 'Supabase 函式庫沒有載入成功，請確認 index.html 裡的 supabase-js CDN 標籤沒被刪掉、網路也能連到 cdn.jsdelivr.net';
+} else if (!isConfiguredSupabaseUrl(SUPABASE_URL)) {
+  sbInitError = 'SUPABASE_URL 格式不正確或還沒填：請確認是完整的 https://xxxxxxxx.supabase.co（結尾不要有斜線、前後不要有空白或引號）';
+} else if (!isConfiguredSupabaseKey(SUPABASE_ANON_KEY)) {
+  sbInitError = 'SUPABASE_ANON_KEY 格式不正確或還沒填：請確認貼的是 Project Settings → API 裡的 anon / public key';
+}
+
 function assertSb() {
-  if (!sb) throw new Error('尚未設定 Supabase 連線資訊，請在 app.js 開頭填入 SUPABASE_URL 與 SUPABASE_ANON_KEY');
+  if (!sb) throw new Error(sbInitError || '尚未設定 Supabase 連線資訊，請在 app.js 開頭填入 SUPABASE_URL 與 SUPABASE_ANON_KEY');
 }
 
 const TARGET_FIELDS_BASE = [
@@ -1110,7 +1144,8 @@ const _fvStamp = document.getElementById('frontendVersionStamp');
 if (_fvStamp) _fvStamp.textContent = FRONTEND_VERSION; else console.warn('找不到版本標示欄位，頁面可能不是最新版本');
 updateFilterIconStates();
 if (!sb) {
-  toast('err', '尚未設定 Supabase 連線資訊，請在 app.js 開頭填入 SUPABASE_URL 與 SUPABASE_ANON_KEY 後再重新整理');
+  toast('err', sbInitError || '尚未設定 Supabase 連線資訊，請在 app.js 開頭填入 SUPABASE_URL 與 SUPABASE_ANON_KEY 後再重新整理');
+  console.error('[Supabase 設定問題]', sbInitError);
 } else {
   loadCustomers(true);
   setupRealtime();
