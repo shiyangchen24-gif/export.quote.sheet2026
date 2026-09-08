@@ -450,13 +450,13 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
     <div class="modal-head">
       <div>
         <h2>批次匯入客戶</h2>
-        <div class="sub">上傳 Excel，第一列為標題，需包含「客戶代號」「客戶名稱」欄位</div>
+        <div class="sub">上傳 Excel，第一列為標題：客戶代號、客戶名稱、報價種類、報價週期、匯出狀態</div>
       </div>
       <button class="modal-close" data-close="ovBatch">✕</button>
     </div>
     <div class="modal-body">
       <div class="dropzone" id="batchDropzone">
-        <strong>點擊選擇檔案</strong> 或拖曳 Excel 檔案到此處
+        <strong>點擊選擇檔案</strong> 或拖曳 Excel 檔案到此處<br>只有「客戶代號」是必要欄位，其餘欄位缺少時會用預設值（有貨號／7天／尚未匯出）
         <input type="file" id="batchFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
       </div>
       <div id="batchPreviewWrap" style="margin-top:14px;display:none;">
@@ -628,6 +628,6 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-08-supabase-v3"></script>
+<script src="app.js?v=2026-09-09-supabase-v4"></script>
 </body>
 </html>
