@@ -1,9 +1,20 @@
-/* ===================== 報價單匯出系統 - 前端邏輯 ===================== */
+/* ===================== 報價單匯出系統 - 前端邏輯（Supabase 版） ===================== */
 
-// 請將此網址換成你部署後的 GAS 執行網址（.../exec）
-const GAS_URL = 'https://script.google.com/macros/s/AKfycby6_k1MtdA07FIN26lBYNkoYTpW-Hm4H7bJ4gkVkkCjZvonj7Lz4vKEjvOJV4ybZ2Oc/exec';
-const FRONTEND_VERSION = '2026-09-06-v10';
-const EXPECTED_BACKEND_VERSION = '2026-09-06-v10'; // 要跟 Code.gs 裡的 BACKEND_VERSION 一致
+// 請填入你的 Supabase 專案資訊：Supabase 後台 →「Project Settings」→「API」
+//   - SUPABASE_URL：例如 https://abcdefghijklmnop.supabase.co
+//   - SUPABASE_ANON_KEY：「Project API keys」裡的 anon / public key（不是 service_role！）
+// 這把 anon key 之後會直接出現在網頁原始碼裡，這是正常且必要的（前端本來就要用它連線），
+// 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
+const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co/rest/v1/';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
+const FRONTEND_VERSION = '2026-09-07-supabase-v1';
+
+const sb = (typeof supabase !== 'undefined' && SUPABASE_URL.indexOf('YOUR_SUPABASE_URL') !== 0 && SUPABASE_ANON_KEY.indexOf('YOUR_SUPABASE_ANON_KEY') !== 0)
+  ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+function assertSb() {
+  if (!sb) throw new Error('尚未設定 Supabase 連線資訊，請在 app.js 開頭填入 SUPABASE_URL 與 SUPABASE_ANON_KEY');
+}
 
 const TARGET_FIELDS_BASE = [
   { key: '貨號',     label: '客戶貨號 *',   required: true },
@@ -36,12 +47,12 @@ const OUTPUT_FIELD_ORDER = [null, null, '貨號', '品名', '單位', '單價', 
 
 const QUOTE_CYCLE_DAYS = { '7天': 7, '10天': 10, '15天': 15, '30天': 30 };
 
-// 解析後端存的 "yyyy/MM/dd HH:mm" 字串為 Date
+// Supabase 的 timestamptz 欄位回傳的是標準 ISO 字串（例如 2026-09-06T01:43:00+00:00），
+// 用原生 Date 建構子就能正確解析，不再需要自己拼格式，也不會有 Google Sheets 自動轉型的問題。
 function parseDateLoose(s) {
   if (!s) return null;
-  const m = String(s).match(/(\d{4})\/(\d{1,2})\/(\d{1,2})(?:\s+(\d{1,2}):(\d{1,2}))?/);
-  if (!m) return null;
-  return new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0));
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
 }
 function formatDateShort(d) {
   if (!d) return '';
@@ -73,69 +84,35 @@ let state = {
   wizard: null // 見 openWizard()
 };
 
-/* ---------------- API ---------------- */
-// 一律走 JSONP：跨網域（GitHub Pages → Apps Script）直接用 fetch 讀寫在部分瀏覽器/行動裝置環境下
-// 會卡住不回應，改用 <script> 標籤讀取可穩定繞過（讀取與寫入都走這個管道）。
-function jsonp(url, params) {
-  return new Promise((resolve, reject) => {
-    const cbName = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
-    const qs = new URLSearchParams(Object.assign({}, params || {}, { callback: cbName })).toString();
-    const script = document.createElement('script');
-    let done = false;
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      cleanup();
-      reject(new Error('連線逾時，請確認 GAS_URL 是否正確、部署存取權限是否為「任何人」'));
-    }, 25000);
-    function cleanup() {
-      clearTimeout(timer);
-      delete window[cbName];
-      script.remove();
-    }
-    window[cbName] = data => {
-      if (done) return;
-      done = true;
-      cleanup();
-      resolve(data);
-    };
-    script.onerror = () => {
-      if (done) return;
-      done = true;
-      cleanup();
-      reject(new Error('無法連線到後端服務，請確認 GAS_URL 是否正確'));
-    };
-    script.src = url + '?' + qs;
-    document.body.appendChild(script);
-  });
+/* ---------------- 資料列轉換：Supabase 的 snake_case 欄位 → 前端慣用的 camelCase ---------------- */
+function rowToCustomer(row) {
+  return {
+    code: row.code,
+    name: row.name || '',
+    quoteCycle: row.quote_cycle || '7天',
+    tradeStatus: row.trade_status || '核准交易',
+    exportStatus: row.export_status || '未匯出',
+    lastExportTime: row.last_export_time || '',
+    lastExportFileName: row.last_export_filename || '',
+    mapping: row.mapping || null,
+    productCodeMode: row.product_code_mode || '有貨號',
+    lastExportItemCount: row.last_export_item_count || 0
+  };
 }
-function apiCall(action, params) {
-  const encoded = {};
-  Object.entries(params || {}).forEach(([k, v]) => {
-    encoded[k] = (v !== null && typeof v === 'object') ? JSON.stringify(v) : v;
-  });
-  return jsonp(GAS_URL, Object.assign({ action }, encoded)).then(res => {
-    if (res && res.backendVersion) checkVersionMismatch(res.backendVersion);
-    return res;
-  }).catch(err => {
-    // 寫入類動作若沒收到回應，伺服器端有可能其實已經執行成功（只是回應沒送達瀏覽器）。
-    // 背景分幾次重新讀取最新資料，讓畫面在數秒到十幾秒內自動校正，不用使用者手動重新整理。
-    if (action !== 'getData') {
-      loadCustomers(false);
-      setTimeout(() => loadCustomers(false), 4000);
-      setTimeout(() => loadCustomers(false), 10000);
-    }
-    throw err;
-  });
-}
-function apiGet(action, params) { return apiCall(action, params); }
 
+/* ---------------- API（Supabase：讀取） ---------------- */
 async function loadCustomers(showLoading) {
   if (showLoading) setLoading(true, '載入客戶資料…');
   try {
-    const res = await apiGet('getData');
-    if (!res.ok) throw new Error(res.error || '讀取失敗');
-    state.customers = res.customers || [];
+    assertSb();
+    // last_item_codes 故意不列在這裡：那個欄位只有匯出當下比對新增品項時才需要，
+    // 客戶數一多、每次輪詢都帶著全部客戶的完整品項清單會浪費頻寬，改成用到才單獨查（見 fetchPreviousCodes）。
+    const { data, error } = await sb
+      .from('customers')
+      .select('code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count')
+      .order('code');
+    if (error) throw new Error(error.message);
+    state.customers = (data || []).map(rowToCustomer);
     renderTable();
     renderStats();
   } catch (err) {
@@ -145,18 +122,19 @@ async function loadCustomers(showLoading) {
   }
 }
 
-// 版本比對：後端版本跟前端預期不同，代表 Code.gs 沒有部署新版本，或瀏覽器還在用舊快取的 app.js
-let versionWarned = false;
-function checkVersionMismatch(backendVersion) {
-  const banner = document.getElementById('versionBanner');
-  if (!banner) return;
-  if (backendVersion && backendVersion !== EXPECTED_BACKEND_VERSION) {
-    banner.style.display = 'flex';
-    banner.querySelector('span').textContent =
-      `⚠ 偵測到版本不一致：網頁預期後端版本「${EXPECTED_BACKEND_VERSION}」，但目前 Apps Script 實際回應的是「${backendVersion}」。這通常代表 Code.gs 只存檔、還沒「部署新版本」。請到 Apps Script →「部署」→「管理部署作業」→ 編輯 → 版本選「新版本」→ 部署。`;
-    if (!versionWarned) { versionWarned = true; toast('err', '偵測到後端版本不是最新，請重新部署 Apps Script（詳見畫面上方提示）'); }
-  } else {
-    banner.style.display = 'none';
+// Realtime：資料在任何裝置異動時，Supabase 會主動推播通知，收到就重新整理一次，
+// 不必再像過去那樣高度依賴輪詢；下面仍保留一個低頻率輪詢當作保險（例如忘了在後台開 Realtime 時）。
+let realtimeChannel = null;
+function setupRealtime() {
+  if (!sb || realtimeChannel) return;
+  try {
+    realtimeChannel = sb.channel('customers-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => {
+        loadCustomers(false);
+      })
+      .subscribe();
+  } catch (err) {
+    console.warn('Realtime 訂閱失敗（不影響基本功能，仍會靠輪詢同步）：', err);
   }
 }
 
@@ -239,8 +217,10 @@ async function readWorkbookRaw(file) {
 /* ---------------- 品項清單（用於比對新增品項） ---------------- */
 async function fetchPreviousCodes(code) {
   try {
-    const res = await apiCall('getItemCodes', { code });
-    return (res && res.ok && Array.isArray(res.codes)) ? res.codes : [];
+    assertSb();
+    const { data, error } = await sb.from('customers').select('last_item_codes').eq('code', code).maybeSingle();
+    if (error || !data) return [];
+    return Array.isArray(data.last_item_codes) ? data.last_item_codes : [];
   } catch (err) { return []; }
 }
 
@@ -272,46 +252,53 @@ async function exportWorkbook(customer, records) {
   const ws = wb.addWorksheet('匯入格式');
   const FONT_NAME = '微軟正黑體';
   const FONT_SIZE = 11;
+  // 效能關鍵：樣式物件在迴圈外先建立好、重複參照使用，不要每個儲存格都 new 一個新物件——
+  // 幾百列 x 13 欄下來，光是物件配置(GC 壓力)就佔掉不少時間。ExcelJS 支援共用同一個樣式物件參照。
   const THIN = { style: 'thin', color: { argb: 'FF000000' } };
   const BORDER = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+  const FONT_NORMAL = { name: FONT_NAME, size: FONT_SIZE };
+  const FONT_NEW = { name: FONT_NAME, size: FONT_SIZE, color: { argb: 'FFFF524D' } };
+  const ALIGN_DEFAULT = { vertical: 'middle' };
+  const ALIGN_LEFT = { vertical: 'middle', horizontal: 'left' };
+  const FILL_NEW = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFDE5A' } };
 
   const headerRow = ws.addRow(OUTPUT_HEADERS);
   headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    cell.font = { name: FONT_NAME, size: FONT_SIZE };
+    cell.font = FONT_NORMAL;
     cell.border = BORDER;
-    cell.alignment = { vertical: 'middle', horizontal: colNumber === 3 ? 'left' : undefined };
+    cell.alignment = colNumber === 3 ? ALIGN_LEFT : ALIGN_DEFAULT;
   });
 
   const widths = [12, 16, 12, 26, 14, 10, 16, 14, 14, 14, 10, 14, 14];
   ws.columns = widths.map(w => ({ width: w }));
 
-  records.forEach(rec => {
-    const priceVal = toNumberIfPossible(rec['單價']);
-    const row = ws.addRow([
-      customer.code,
-      customer.name || '',
-      rec['貨號'] || '',
-      rec['品名'] || '',
-      rec['單位'] || '',
-      priceVal,
-      rec['備註'] || '',
-      rec['產區品種'] || '',
-      rec['裝箱方式'] || '',
-      rec['包裝資材'] || '',
-      rec['產地'] || '',
-      rec['不報價原因'] || '',
-      rec['變價原因'] || ''
-    ]);
+  // 效能關鍵：先把所有列的值組成二維陣列，一次用 addRows 批次插入，
+  // 比逐列呼叫 addRow 快上不少（ExcelJS 內部對批次插入有做優化）。
+  const rowValues = records.map(rec => [
+    customer.code,
+    customer.name || '',
+    rec['貨號'] || '',
+    rec['品名'] || '',
+    rec['單位'] || '',
+    toNumberIfPossible(rec['單價']),
+    rec['備註'] || '',
+    rec['產區品種'] || '',
+    rec['裝箱方式'] || '',
+    rec['包裝資材'] || '',
+    rec['產地'] || '',
+    rec['不報價原因'] || '',
+    rec['變價原因'] || ''
+  ]);
+  const addedRows = ws.addRows(rowValues);
+  addedRows.forEach((row, i) => {
+    const rec = records[i];
     row.getCell(3).numFmt = '@';
+    const font = rec._isNew ? FONT_NEW : FONT_NORMAL;
     row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      cell.font = rec._isNew
-        ? { name: FONT_NAME, size: FONT_SIZE, color: { argb: 'FFFF524D' } }
-        : { name: FONT_NAME, size: FONT_SIZE };
+      cell.font = font;
       cell.border = BORDER;
-      cell.alignment = { vertical: 'middle', horizontal: colNumber === 3 ? 'left' : undefined };
-      if (rec._isNew) {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFDE5A' } };
-      }
+      cell.alignment = colNumber === 3 ? ALIGN_LEFT : ALIGN_DEFAULT;
+      if (rec._isNew) cell.fill = FILL_NEW;
     });
   });
 
@@ -324,23 +311,21 @@ async function exportWorkbook(customer, records) {
 }
 
 // 匯出成功後：更新匯出狀態，並把這次的品項識別值存起來供下次比對「新增品項」用。
-// 清單較小時直接跟著 markExported 一起送；太大時（網址長度限制）先標記狀態，再分批 append。
+// Supabase 的 jsonb 欄位沒有 GAS 網址長度那種限制，一次寫入即可，不用再分批。
 async function persistExportResult(customer, records, outName) {
+  assertSb();
   const identityField = getIdentityField(customer.productCodeMode);
   const codes = records.map(r => r[identityField]).filter(Boolean);
-  const codesJson = JSON.stringify(codes);
-  let res;
-  if (codesJson.length <= 1400) {
-    res = await apiCall('markExported', { code: customer.code, fileName: outName, itemCount: records.length, itemCodes: codesJson });
-  } else {
-    res = await apiCall('markExported', { code: customer.code, fileName: outName, itemCount: records.length });
-    const CHUNK = 100;
-    for (let i = 0; i < codes.length; i += CHUNK) {
-      const chunk = codes.slice(i, i + CHUNK);
-      await apiCall('appendItemCodes', { code: customer.code, codes: chunk, isFirst: i === 0 });
-    }
-  }
-  return res;
+  const { data, error } = await sb.from('customers').update({
+    export_status: '已匯出',
+    last_export_time: new Date().toISOString(),
+    last_export_filename: outName,
+    last_export_item_count: records.length,
+    last_item_codes: codes,
+    updated_at: new Date().toISOString()
+  }).eq('code', customer.code).select().single();
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, customer: rowToCustomer(data) };
 }
 
 /* ---------------- 統計與表格渲染 ---------------- */
@@ -440,9 +425,12 @@ async function unexportCustomer(customer) {
   if (!confirm(`確定要清除 ${customer.code} 的匯出紀錄嗎？清除後將視為「尚未匯出過」，到期日重新計算。`)) return;
   setLoading(true, '更新狀態…');
   try {
-    const res = await apiCall('resetExportStatus', { code: customer.code });
-    if (!res.ok) throw new Error(res.error || '更新失敗');
-    upsertCustomer(res.customer);
+    assertSb();
+    const { data, error } = await sb.from('customers').update({
+      export_status: '未匯出', last_export_time: null, last_export_filename: '', updated_at: new Date().toISOString()
+    }).eq('code', customer.code).select().single();
+    if (error) throw new Error(error.message);
+    upsertCustomer(rowToCustomer(data));
     toast('ok', `已清除 ${customer.code} 的匯出紀錄`);
   } catch (err) { toast('err', err.message); }
   finally { setLoading(false); }
@@ -452,9 +440,12 @@ async function reconfigureMapping(customer) {
   if (!confirm(`確定要清除 ${customer.code} 已設定的欄位對應範本嗎？下次上傳時需要重新設定。`)) return;
   setLoading(true, '清除設定中…');
   try {
-    const res = await apiCall('clearMapping', { code: customer.code });
-    if (!res.ok) throw new Error(res.error || '清除失敗');
-    upsertCustomer(res.customer);
+    assertSb();
+    const { data, error } = await sb.from('customers').update({
+      mapping: null, updated_at: new Date().toISOString()
+    }).eq('code', customer.code).select().single();
+    if (error) throw new Error(error.message);
+    upsertCustomer(rowToCustomer(data));
     toast('ok', `已清除 ${customer.code} 的欄位對應設定`);
   } catch (err) { toast('err', err.message); }
   finally { setLoading(false); }
@@ -595,9 +586,12 @@ document.getElementById('btnResetAll').addEventListener('click', async () => {
   if (!confirm('確定要清除「全部」客戶的匯出紀錄嗎？清除後全部客戶會變成「尚未匯出過」，到期日重新計算。')) return;
   setLoading(true, '重置中…');
   try {
-    const res = await apiCall('resetAllExportStatus', {});
-    if (!res.ok) throw new Error(res.error || '重置失敗');
-    state.customers = res.customers;
+    assertSb();
+    const { data, error } = await sb.from('customers').update({
+      export_status: '未匯出', last_export_time: null, last_export_filename: '', updated_at: new Date().toISOString()
+    }).not('code', 'is', null).select();
+    if (error) throw new Error(error.message);
+    state.customers = (data || []).map(rowToCustomer);
     renderTable(); renderStats();
     toast('ok', '已清除全部客戶的匯出紀錄');
   } catch (err) { toast('err', err.message); }
@@ -620,22 +614,52 @@ function openCustomerModal(customer) {
 }
 document.getElementById('btnAddCustomer').addEventListener('click', () => openCustomerModal(null));
 
+// 新增/編輯客戶寫入邏輯：只有「匯出狀態」真的有變動時才動到 last_export_time，
+// 避免只是改個名字之類的無關編輯，卻不小心把到期日重新起算。
+async function saveCustomerToBackend(payload) {
+  assertSb();
+  const { data: existing, error: selErr } = await sb.from('customers').select('export_status').eq('code', payload.code).maybeSingle();
+  if (selErr) throw new Error(selErr.message);
+  const desired = payload.exportStatus === '已匯出' ? '已匯出' : '未匯出';
+  const nowIso = new Date().toISOString();
+
+  const upsertRow = {
+    code: payload.code,
+    name: payload.name || '',
+    product_code_mode: payload.productCodeMode === '無貨號' ? '無貨號' : '有貨號',
+    quote_cycle: ['7天', '10天', '15天', '30天'].includes(payload.quoteCycle) ? payload.quoteCycle : '7天',
+    updated_at: nowIso
+  };
+  if (!existing) {
+    upsertRow.export_status = desired;
+    upsertRow.last_export_time = desired === '已匯出' ? nowIso : null;
+  } else if (desired !== (existing.export_status || '未匯出')) {
+    upsertRow.export_status = desired;
+    if (desired === '已匯出') {
+      upsertRow.last_export_time = nowIso;
+    } else {
+      upsertRow.last_export_time = null;
+      upsertRow.last_export_filename = '';
+    }
+  }
+  const { data, error } = await sb.from('customers').upsert(upsertRow, { onConflict: 'code' }).select().single();
+  if (error) throw new Error(error.message);
+  return rowToCustomer(data);
+}
+
 document.getElementById('btnSaveCustomer').addEventListener('click', async () => {
   const code = document.getElementById('custCode').value.trim();
   const name = document.getElementById('custName').value.trim();
   if (!code) { toast('err', '請輸入客戶代號'); return; }
   setLoading(true, '儲存中…');
   try {
-    const res = await apiCall('saveCustomer', {
-      customer: {
-        code, name,
-        productCodeMode: document.getElementById('custProductCodeMode').value,
-        quoteCycle: document.getElementById('custQuoteCycle').value,
-        exportStatus: document.getElementById('custExportStatus').value
-      }
+    const customer = await saveCustomerToBackend({
+      code, name,
+      productCodeMode: document.getElementById('custProductCodeMode').value,
+      quoteCycle: document.getElementById('custQuoteCycle').value,
+      exportStatus: document.getElementById('custExportStatus').value
     });
-    if (!res.ok) throw new Error(res.error || '儲存失敗');
-    upsertCustomer(res.customer);
+    upsertCustomer(customer);
     closeModal('ovCustomer');
     toast('ok', '客戶資料已儲存');
   } catch (err) { toast('err', err.message); }
@@ -701,15 +725,20 @@ document.getElementById('btnConfirmBatch').addEventListener('click', async () =>
   if (!batchParsed.length) return;
   setLoading(true, '匯入客戶中…');
   try {
-    const CHUNK = 60;
-    let lastRes = null;
+    assertSb();
+    // Postgres 的 upsert 沒有 GAS 網址長度那種限制，可以一次送一大批；
+    // 這裡仍保留適度分批（300 筆一批）純粹是避免單次請求過大，不是為了繞過什麼限制。
+    const CHUNK = 300;
+    const allRows = [];
     for (let i = 0; i < batchParsed.length; i += CHUNK) {
       const chunk = batchParsed.slice(i, i + CHUNK);
       setLoading(true, `匯入客戶中… (${Math.min(i + CHUNK, batchParsed.length)}/${batchParsed.length})`);
-      lastRes = await apiCall('batchImportCustomers', { customers: chunk });
-      if (!lastRes.ok) throw new Error(lastRes.error || '匯入失敗');
+      const payload = chunk.map(c => ({ code: c.code, name: c.name }));
+      const { data, error } = await sb.from('customers').upsert(payload, { onConflict: 'code' }).select();
+      if (error) throw new Error(error.message);
+      allRows.push(...(data || []));
     }
-    if (lastRes) { state.customers = lastRes.customers; renderTable(); renderStats(); }
+    allRows.forEach(row => upsertCustomer(rowToCustomer(row)));
     closeModal('ovBatch');
     toast('ok', `已匯入 ${batchParsed.length} 筆客戶資料`);
   } catch (err) { toast('err', err.message); }
@@ -1032,11 +1061,15 @@ document.getElementById('wizBack').addEventListener('click', () => {
 
 async function saveMappingForCustomer() {
   try {
+    assertSb();
     const mapping = { dataStartRowIdx: state.wizard.dataStartRowIdx, columnMap: state.wizard.columnMap };
-    const res = await apiCall('saveMapping', { code: state.wizard.customer.code, mapping });
-    if (res.ok && res.customer) {
-      state.wizard.customer = res.customer;
-      upsertCustomer(res.customer);
+    const { data, error } = await sb.from('customers').update({
+      mapping, updated_at: new Date().toISOString()
+    }).eq('code', state.wizard.customer.code).select().single();
+    if (!error && data) {
+      const customer = rowToCustomer(data);
+      state.wizard.customer = customer;
+      upsertCustomer(customer);
     }
   } catch (err) { /* 靜默失敗，不影響匯出流程 */ }
 }
@@ -1063,9 +1096,10 @@ document.getElementById('wizExport').addEventListener('click', async () => {
     closeModal('ovWizard');
     toast('ok', `已匯出 ${customer.code}，共 ${convertedRecords.length} 項，並標示為已匯出`);
   } catch (err) {
-    // 檔案已經下載成功，只是這次沒收到雲端狀態更新的回應（伺服器端很可能其實已寫入成功）。
-    // apiCall 內部已觸發背景重新整理，這裡再補提示，表格幾秒內應該會自動校正。
-    toast('err', `檔案已下載，但狀態更新沒有收到回應，正在背景重新確認最新狀態…（${err.message}）`);
+    // 檔案已經下載成功，只是這次狀態更新失敗（Supabase 走標準 REST API，這種情況比過去用
+    // Google Apps Script/JSONP 時少見很多，但仍保留一次背景重新整理當保險）。
+    loadCustomers(false);
+    toast('err', `檔案已下載，但狀態更新失敗，已重新整理最新狀態，請確認表格是否正確（${err.message}）`);
   } finally {
     setLoading(false);
   }
@@ -1075,8 +1109,14 @@ document.getElementById('wizExport').addEventListener('click', async () => {
 const _fvStamp = document.getElementById('frontendVersionStamp');
 if (_fvStamp) _fvStamp.textContent = FRONTEND_VERSION; else console.warn('找不到版本標示欄位，頁面可能不是最新版本');
 updateFilterIconStates();
-loadCustomers(true);
-let pollTimer = setInterval(() => { if (!document.hidden) loadCustomers(false); }, 25000);
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) loadCustomers(false); // 回到分頁時立即補一次，不用等下一輪
-});
+if (!sb) {
+  toast('err', '尚未設定 Supabase 連線資訊，請在 app.js 開頭填入 SUPABASE_URL 與 SUPABASE_ANON_KEY 後再重新整理');
+} else {
+  loadCustomers(true);
+  setupRealtime();
+  // Realtime 是主要同步機制，這裡的輪詢降為低頻率保險，避免忘了在 Supabase 後台開 Realtime 時完全沒有同步
+  let pollTimer = setInterval(() => { if (!document.hidden) loadCustomers(false); }, 60000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) loadCustomers(false); // 回到分頁時立即補一次，不用等下一輪
+  });
+}
