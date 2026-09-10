@@ -147,6 +147,9 @@ input,select{font-family:inherit;}
 
 /* table */
 .table-wrap{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:visible;box-shadow:var(--shadow);}
+#custTable{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;}
+#custTable td.code, #custTable td:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#custTable td.actions{white-space:normal;} /* 固定欄寬下，操作欄按鈕較多時允許換行，避免溢出到旁邊欄位 */
 table{width:100%;border-collapse:collapse;font-size:13px;}
 thead th{
   text-align:left;padding:11px 14px;background:var(--paper-100);
@@ -483,8 +486,14 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
     </div>
     <div class="modal-body">
       <div class="dropzone" id="batchQuotesDropzone">
-        <strong>點擊選擇多個檔案</strong> 或拖曳多個報價單檔案到此處<br>檔名需包含客戶代號或客戶名稱才能自動辨識
+        拖曳多個報價單檔案到此處<br>檔名需包含客戶代號或客戶名稱才能自動辨識；可以分好幾次選取或拖曳，會自動累加、不會蓋掉之前選的
         <input type="file" id="batchQuotesFileInput" accept=".xlsx,.xls,.csv" multiple style="display:none;">
+        <input type="file" id="batchQuotesFolderInput" webkitdirectory directory multiple style="display:none;">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn btn-secondary small" id="btnBatchQuotesPickFiles">選擇檔案</button>
+        <button class="btn btn-secondary small" id="btnBatchQuotesPickFolder">選擇資料夾</button>
+        <button class="btn btn-ghost small" id="btnBatchQuotesClear">清空清單</button>
       </div>
       <div id="batchQuotesPreviewWrap" style="margin-top:14px;display:none;">
         <div class="hint" id="batchQuotesSummary" style="margin-bottom:8px;"></div>
@@ -628,6 +637,6 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-09-supabase-v4"></script>
+<script src="app.js?v=2026-09-09-supabase-v5"></script>
 </body>
 </html>
