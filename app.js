@@ -1,672 +1,1612 @@
-<!DOCTYPE html>
-<html lang="zh-Hant">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>報價單匯出系統 · 忠欣蔬果</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj4KPHJlY3QgeD0iMTYiIHk9IjgiIHdpZHRoPSI0ODAiIGhlaWdodD0iNDk2IiByeD0iMTQwIiBmaWxsPSIjMUY3QTNEIi8+CjxyZWN0IHg9IjEyOCIgeT0iODAiIHdpZHRoPSI5NiIgaGVpZ2h0PSI5NiIgcng9IjI2IiBmaWxsPSIjZmZmZmZmIi8+CjxyZWN0IHg9IjEyOCIgeT0iMjA4IiB3aWR0aD0iOTYiIGhlaWdodD0iOTYiIHJ4PSIyNiIgZmlsbD0iI2ZmZmZmZiIvPgo8cmVjdCB4PSIxMjgiIHk9IjMzNiIgd2lkdGg9Ijk2IiBoZWlnaHQ9Ijk2IiByeD0iMjYiIGZpbGw9IiNmZmZmZmYiLz4KPHJlY3QgeD0iMjYwIiB5PSIxMDQiIHdpZHRoPSIxMjgiIGhlaWdodD0iNDgiIHJ4PSIyNCIgZmlsbD0iI2ZmZmZmZiIvPgo8cmVjdCB4PSIyNjAiIHk9IjIzMiIgd2lkdGg9IjEyOCIgaGVpZ2h0PSI0OCIgcng9IjI0IiBmaWxsPSIjZmZmZmZmIi8+CjxyZWN0IHg9IjI2MCIgeT0iMzYwIiB3aWR0aD0iMTI4IiBoZWlnaHQ9IjQ4IiByeD0iMjQiIGZpbGw9IiNmZmZmZmYiLz4KPC9zdmc+Cg==">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<!-- Supabase 用戶端函式庫：核心資料存取都要用到，直接載入（不像 xlsx/exceljs 只有特定操作才需要） -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<!-- xlsx / exceljs / FileSaver 改由 app.js 依需要時才動態載入，避免拖慢首次進站速度 -->
-<style>
-:root{
-  --soil-950:#161a14;
-  --soil-900:#1f2419;
-  --leaf-700:#2f4a34;
-  --leaf-600:#3c5e42;
-  --leaf-500:#4f7856;
-  --paper-50:#f8f7f2;
-  --paper-100:#efece1;
-  --paper-200:#e2ddcb;
-  --line:#d8d2bd;
-  --ink:#26291f;
-  --ink-soft:#5a5c4f;
-  --amber-500:#c9862f;
-  --amber-100:#f7e6c8;
-  --rust-600:#a5432c;
-  --rust-100:#f6dfd8;
-  --ok-600:#3c6e4c;
-  --ok-100:#dcead9;
-  /* 指定色系 */
-  --green-ok:#31B54C;
-  --green-ok-bg:#e4f6e8;
-  --red-bad:#FF524D;
-  --red-bad-bg:#ffe7e6;
-  --orange-action:#ff8637;
-  --green-export:#1F7A3D;
-  --new-item-yellow:#ffde5a;
-  --radius:10px;
-  --shadow:0 1px 2px rgba(22,26,20,.06), 0 6px 20px rgba(22,26,20,.05);
-  font-size:15px;
-}
-*{box-sizing:border-box;}
-html,body{margin:0;padding:0;}
-body{
-  font-family:'Inter',system-ui,sans-serif;
-  background:var(--paper-50);
-  color:var(--ink);
-  line-height:1.5;
-  -webkit-font-smoothing:antialiased;
-}
-.mono{font-family:'JetBrains Mono',monospace;}
-button{font-family:inherit;cursor:pointer;}
-input,select{font-family:inherit;}
+/* ===================== 報價單匯出系統 - 前端邏輯（Supabase 版） ===================== */
 
-/* ---------- shell ---------- */
-.shell{max-width:1880px;width:96%;margin:0 auto;padding:28px 24px 80px;}
-.topbar{
-  display:flex;align-items:flex-end;justify-content:space-between;
-  gap:20px;flex-wrap:wrap;
-  border-bottom:1px solid var(--line);
-  padding-bottom:20px;margin-bottom:18px;
-}
-.brand-mark{display:flex;align-items:center;gap:12px;}
-.brand-mark .glyph{
-  width:38px;height:38px;border-radius:9px;
-  background:linear-gradient(155deg,var(--leaf-600),var(--soil-900));
-  display:flex;align-items:center;justify-content:center;
-  color:var(--paper-50);font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px;
-  flex-shrink:0;
-}
-.brand-mark h1{font-size:19px;font-weight:700;margin:0;letter-spacing:-.01em;}
-.brand-mark p{margin:2px 0 0;font-size:12.5px;color:var(--ink-soft);}
+// 請填入你的 Supabase 專案資訊：Supabase 後台 →「Project Settings」→「API」
+//   - SUPABASE_URL：例如 https://abcdefghijklmnop.supabase.co（結尾不要加斜線 /，也不要自己加 /rest/v1 之類的路徑）
+//   - SUPABASE_ANON_KEY：「Project API keys」裡的 anon / public key（不是 service_role！）
+// 這把 anon key 之後會直接出現在網頁原始碼裡，這是正常且必要的（前端本來就要用它連線），
+// 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
+const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
+const FRONTEND_VERSION = '2026-09-10-supabase-v6';
 
-/* 統計卡（可點擊篩選） */
-.tab-row{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--line);}
-.tab-btn{
-  border:none;background:transparent;padding:10px 4px;margin-right:18px;font-size:14px;font-weight:600;
-  color:var(--ink-soft);border-bottom:2.5px solid transparent;margin-bottom:-1px;
+// 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
+// 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
+// 斜線、引號，或是把 anon key 貼錯欄位，都可能造成 Supabase 用戶端內部組網址失敗，
+// 出現「Invalid path specified in request URL」這種不容易懂的錯誤，所以這裡先擋掉。
+function isConfiguredSupabaseUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  if (url.indexOf('YOUR_SUPABASE_URL') !== -1) return false;
+  const trimmed = url.trim();
+  if (trimmed !== url) return false; // 前後有多餘空白，代表複製貼上時可能出錯
+  try {
+    const u = new URL(trimmed);
+    return u.protocol === 'https:' && u.hostname.length > 3 && (u.pathname === '' || u.pathname === '/');
+  } catch (e) { return false; }
 }
-.tab-btn:hover{color:var(--ink);}
-.tab-btn.active{color:var(--leaf-700);border-bottom-color:var(--leaf-600);}
-
-.stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;}
-.stat-card{
-  background:#fff;border:1.5px solid var(--line);border-radius:10px;
-  padding:10px 18px;min-width:96px;text-align:center;cursor:pointer;
-  transition:border-color .12s, box-shadow .12s;
-}
-.stat-card:hover{border-color:var(--ink-soft);}
-.stat-card.active{border-color:var(--soil-900);box-shadow:0 0 0 2px rgba(31,36,25,.08);}
-.stat-card .n{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:19px;display:block;line-height:1.1;}
-.stat-card .l{font-size:11px;color:var(--ink-soft);margin-top:3px;display:block;}
-
-/* toolbar */
-.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;}
-.search-box{flex:1;min-width:180px;position:relative;}
-.search-box input{
-  width:100%;padding:9px 12px 9px 34px;border:1px solid var(--line);border-radius:8px;
-  background:#fff;font-size:13.5px;color:var(--ink);
-}
-.search-box input:focus{outline:none;border-color:var(--leaf-500);}
-.search-box::before{
-  content:"";position:absolute;left:12px;top:50%;transform:translateY(-50%);
-  width:13px;height:13px;border:1.6px solid var(--ink-soft);border-radius:50%;
-}
-.search-box::after{
-  content:"";position:absolute;left:20.5px;top:calc(50% + 5px);
-  width:6px;height:1.6px;background:var(--ink-soft);transform:rotate(45deg);
-}
-.select-filter{
-  padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px;color:var(--ink);
-}
-.row-menu label{
-  display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:13px;color:var(--ink);border-radius:7px;cursor:pointer;
-}
-.row-menu label:hover{background:var(--paper-100);}
-.row-menu label input{margin:0;}
-
-.btn{
-  border:1px solid var(--line);background:#fff;color:var(--ink);
-  padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;
-  display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
-  transition:border-color .12s, background .12s, opacity .12s;
-}
-.btn:hover{border-color:var(--ink-soft);}
-.btn-primary{background:var(--leaf-600);border-color:var(--leaf-600);color:#fff;}
-.btn-primary:hover{background:var(--leaf-700);border-color:var(--leaf-700);}
-.btn-dark{background:var(--soil-900);border-color:var(--soil-900);color:#fff;}
-.btn-dark:hover{background:#0f1209;}
-.btn-ghost{background:transparent;border-color:transparent;}
-.btn-ghost:hover{background:var(--paper-200);}
-.btn-secondary{background:#fff;border-color:var(--line);color:var(--ink);}
-.btn-export{background:var(--green-export);border-color:var(--green-export);color:#fff;}
-.btn-export:hover{opacity:.9;}
-.btn-upload{background:var(--orange-action);border-color:var(--orange-action);color:#fff;}
-.btn-upload:hover{opacity:.9;}
-.btn-danger{color:var(--rust-600);}
-.btn-danger-outline{background:#fff;border-color:var(--rust-600);color:var(--rust-600);}
-.btn-danger-outline:hover{background:var(--rust-100);}
-.btn:disabled{opacity:.45;cursor:not-allowed;}
-.btn.small{padding:5px 10px;font-size:12px;border-radius:6px;}
-.btn-icon{
-  width:30px;height:30px;padding:0;justify-content:center;border-radius:7px;
-  border:1px solid var(--line);background:#fff;color:var(--ink-soft);font-size:16px;font-weight:700;
-}
-.btn-icon:hover{background:var(--paper-200);color:var(--ink);}
-
-/* table */
-.table-wrap{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:visible;box-shadow:var(--shadow);}
-#custTable{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;}
-#custTable td.code, #custTable td:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-#custTable td.actions{white-space:normal;} /* 固定欄寬下，操作欄按鈕較多時允許換行，避免溢出到旁邊欄位 */
-table{width:100%;border-collapse:collapse;font-size:13px;}
-thead th{
-  text-align:left;padding:11px 14px;background:var(--paper-100);
-  color:var(--ink-soft);font-weight:600;font-size:11.5px;letter-spacing:.02em;
-  border-bottom:1px solid var(--line);white-space:nowrap;
-}
-.th-filter-btn{
-  display:inline-flex;align-items:center;justify-content:center;
-  width:18px;height:18px;padding:0;margin-left:3px;border:none;background:transparent;
-  color:var(--ink-soft);border-radius:5px;vertical-align:middle;
-}
-.th-filter-btn:hover{background:var(--paper-200);color:var(--ink);}
-.th-filter-btn.active{color:var(--leaf-600);background:var(--ok-100);}
-tbody td{padding:11px 14px;border-bottom:1px solid var(--paper-200);vertical-align:middle;}
-tbody tr:last-child td{border-bottom:none;}
-tbody tr:hover{background:var(--paper-50);}
-td.code{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--soil-900);}
-td.actions{text-align:left;white-space:normal;position:relative;}
-td.actions .btn{margin-right:6px;margin-bottom:4px;}
-.text-link{
-  display:inline-block;background:none;border:none;padding:0;margin-right:14px;margin-bottom:4px;
-  font-size:12.5px;font-weight:600;color:var(--leaf-600);cursor:pointer;text-decoration:none;
-}
-.text-link:hover{text-decoration:underline;}
-.text-link.danger{color:var(--rust-600);}
-td.selcol{width:36px;text-align:center;}
-td.selcol input, th.selcol input{width:15px;height:15px;cursor:pointer;}
-
-.badge{
-  display:inline-flex;align-items:center;gap:5px;white-space:nowrap;
-  padding:3px 9px;border-radius:20px;font-size:11.5px;font-weight:600;
-}
-.badge::before{content:"";width:6px;height:6px;border-radius:50%;}
-.badge.badge-green{background:var(--green-ok-bg);color:var(--green-ok);}
-.badge.badge-green::before{background:var(--green-ok);}
-.badge.badge-red{background:var(--red-bad-bg);color:var(--red-bad);}
-.badge.badge-red::before{background:var(--red-bad);}
-
-.empty-state{padding:56px 20px;text-align:center;color:var(--ink-soft);}
-.empty-state .glyph{font-size:26px;margin-bottom:8px;}
-.empty-state h3{margin:0 0 4px;color:var(--ink);font-size:15px;}
-.empty-state p{margin:0;font-size:13px;}
-
-/* 三點選單 */
-.row-menu{
-  position:fixed;display:none;flex-direction:column;min-width:172px;
-  background:#fff;border:1px solid var(--line);border-radius:10px;
-  box-shadow:0 10px 30px rgba(22,26,20,.18);z-index:150;overflow:hidden;padding:4px;
-}
-.row-menu button{
-  text-align:left;border:none;background:transparent;padding:9px 12px;font-size:13px;color:var(--ink);border-radius:7px;
-}
-.row-menu button:hover{background:var(--paper-100);}
-.row-menu button.danger{color:var(--rust-600);}
-
-/* ---------- modal ---------- */
-.overlay{
-  position:fixed;inset:0;background:rgba(22,26,20,.45);
-  display:none;align-items:center;justify-content:center;z-index:100;padding:24px;
-  backdrop-filter:blur(1px);
-}
-.overlay.open{display:flex;}
-.modal{
-  background:#fff;border-radius:14px;max-width:560px;width:100%;
-  max-height:88vh;overflow:hidden;display:flex;flex-direction:column;
-  box-shadow:0 20px 60px rgba(22,26,20,.25);
-}
-.modal.wide{max-width:900px;}
-.modal-head{
-  padding:18px 22px;border-bottom:1px solid var(--paper-200);
-  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
-}
-.modal-head h2{font-size:16px;margin:0;font-weight:700;}
-.modal-head .sub{font-size:12px;color:var(--ink-soft);margin-top:2px;}
-.modal-close{
-  width:28px;height:28px;border-radius:7px;border:none;background:var(--paper-100);
-  color:var(--ink-soft);font-size:15px;display:flex;align-items:center;justify-content:center;
-}
-.modal-close:hover{background:var(--paper-200);color:var(--ink);}
-.modal-body{padding:20px 22px;overflow-y:auto;flex:1;}
-.modal-foot{
-  padding:14px 22px;border-top:1px solid var(--paper-200);
-  display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;background:var(--paper-50);
+function isConfiguredSupabaseKey(key) {
+  if (!key || typeof key !== 'string') return false;
+  if (key.indexOf('YOUR_SUPABASE_ANON_KEY') !== -1) return false;
+  return key.trim() === key && key.length > 20;
 }
 
-.field{margin-bottom:14px;}
-.field label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);margin-bottom:5px;}
-.field input[type=text],.field select,.field textarea{
-  width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-size:13.5px;background:#fff;
+const _sbConfigOk = typeof supabase !== 'undefined' && isConfiguredSupabaseUrl(SUPABASE_URL) && isConfiguredSupabaseKey(SUPABASE_ANON_KEY);
+let sb = null;
+let sbInitError = '';
+if (_sbConfigOk) {
+  try {
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  } catch (err) {
+    sbInitError = 'Supabase 用戶端建立失敗：' + err.message + '（請確認 SUPABASE_URL／SUPABASE_ANON_KEY 是否貼對、貼完整）';
+  }
+} else if (typeof supabase === 'undefined') {
+  sbInitError = 'Supabase 函式庫沒有載入成功，請確認 index.html 裡的 supabase-js CDN 標籤沒被刪掉、網路也能連到 cdn.jsdelivr.net';
+} else if (!isConfiguredSupabaseUrl(SUPABASE_URL)) {
+  sbInitError = 'SUPABASE_URL 格式不正確或還沒填：請確認是完整的 https://xxxxxxxx.supabase.co（結尾不要有斜線、前後不要有空白或引號）';
+} else if (!isConfiguredSupabaseKey(SUPABASE_ANON_KEY)) {
+  sbInitError = 'SUPABASE_ANON_KEY 格式不正確或還沒填：請確認貼的是 Project Settings → API 裡的 anon / public key';
 }
-.field input:focus,.field select:focus{outline:none;border-color:var(--leaf-500);}
-.field-row{display:flex;gap:12px;}
-.field-row .field{flex:1;}
-.hint{font-size:11.5px;color:var(--ink-soft);margin-top:4px;}
 
-.dropzone{
-  border:1.5px dashed var(--line);border-radius:10px;padding:28px 16px;text-align:center;
-  color:var(--ink-soft);font-size:13px;background:var(--paper-50);cursor:pointer;
+function assertSb() {
+  if (!sb) throw new Error(sbInitError || '尚未設定 Supabase 連線資訊，請在 app.js 開頭填入 SUPABASE_URL 與 SUPABASE_ANON_KEY');
 }
-.dropzone:hover{border-color:var(--leaf-500);color:var(--leaf-600);}
-.dropzone.drag{border-color:var(--leaf-500);background:var(--ok-100);}
-.dropzone strong{color:var(--ink);}
 
-.wizard-steps{display:flex;gap:6px;margin-bottom:18px;}
-.wizard-steps .step{flex:1;height:4px;border-radius:3px;background:var(--paper-200);}
-.wizard-steps .step.active,.wizard-steps .step.done{background:var(--leaf-600);}
-
-.preview-scroll{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:8px;}
-.preview-scroll table{font-size:12px;}
-.preview-scroll thead th{position:sticky;top:0;z-index:2;}
-.preview-scroll td, .preview-scroll th{padding:6px 9px;white-space:nowrap;}
-.preview-scroll tr.header-row-pick{cursor:pointer;}
-.preview-scroll tr.marked-start{background:var(--ok-100) !important;}
-.preview-scroll tr.marked-start td:first-child{font-weight:700;color:var(--ok-600);}
-
-.map-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;margin-top:6px;}
-.map-grid .col-label{font-size:12px;color:var(--ink-soft);margin-bottom:3px;}
-.map-grid .col-sample{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink);background:var(--paper-100);padding:5px 8px;border-radius:6px;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-
-.result-summary{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
-.pill{padding:6px 12px;border-radius:8px;font-size:12.5px;font-weight:600;background:var(--paper-100);color:var(--ink-soft);}
-.pill.ok{background:var(--ok-100);color:var(--ok-600);}
-.pill.warn{background:#fff4cf;color:#8a6d17;}
-
-tr.new-item-row td{background:var(--new-item-yellow) !important;color:var(--red-bad) !important;font-weight:500;}
-tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !important;font-weight:500;}
-
-.kv-table{width:100%;border-collapse:collapse;font-size:13.5px;}
-.kv-table td{padding:8px 4px;border-bottom:1px solid var(--paper-200);}
-.kv-table td:first-child{color:var(--ink-soft);width:38%;}
-
-.toast-wrap{position:fixed;bottom:22px;right:22px;z-index:200;display:flex;flex-direction:column;gap:8px;}
-.toast{
-  background:var(--soil-900);color:#fff;padding:11px 16px;border-radius:9px;font-size:13px;
-  box-shadow:0 8px 24px rgba(0,0,0,.25);display:flex;align-items:center;gap:8px;
-  animation:toast-in .18s ease-out;
+const TARGET_FIELDS_BASE = [
+  { key: '貨號',     label: '客戶貨號 *',   required: true },
+  { key: '品名',     label: '客戶商品名稱', required: false },
+  { key: '單位',     label: '客戶規格單位', required: false },
+  { key: '單價',     label: '單價 *',       required: true },
+  { key: '備註',     label: '備註',         required: false },
+  { key: '產區品種', label: '產區/品種',    required: false },
+  { key: '裝箱方式', label: '裝箱方式',     required: false },
+  { key: '包裝資材', label: '包裝資材',     required: false },
+  { key: '產地',     label: '產地',         required: false },
+  { key: '不報價原因', label: '不報價原因', required: false },
+  { key: '變價原因', label: '變價原因',     required: false }
+];
+// 「無貨號」客戶改用商品名稱當識別欄位；必填標記需要跟著換
+function getTargetFields(productCodeMode) {
+  const noCode = productCodeMode === '無貨號';
+  return TARGET_FIELDS_BASE.map(f => {
+    if (f.key === '貨號') return Object.assign({}, f, { required: !noCode, label: noCode ? '客戶貨號（無則留空）' : '客戶貨號 *' });
+    if (f.key === '品名') return Object.assign({}, f, { required: noCode, label: noCode ? '客戶商品名稱 *' : '客戶商品名稱' });
+    return f;
+  });
 }
-.toast.err{background:var(--rust-600);}
-.toast.ok{background:var(--leaf-700);}
-@keyframes toast-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
-
-.spinner{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;animation:spin .7s linear infinite;flex-shrink:0;}
-@keyframes spin{to{transform:rotate(360deg);}}
-.loading-overlay{
-  position:fixed;inset:0;background:rgba(248,247,242,.7);z-index:300;
-  display:none;align-items:center;justify-content:center;flex-direction:column;gap:10px;
+function getIdentityField(productCodeMode) {
+  return productCodeMode === '無貨號' ? '品名' : '貨號';
 }
-.loading-overlay.open{display:flex;}
-.loading-overlay .ring{width:26px;height:26px;border-radius:50%;border:3px solid var(--paper-200);border-top-color:var(--leaf-600);animation:spin .8s linear infinite;}
-.loading-overlay span{font-size:13px;color:var(--ink-soft);}
 
-@media (max-width:640px){
-  .map-grid{grid-template-columns:1fr;}
-  .shell{padding:18px 14px 60px;}
-  td.actions{white-space:normal;}
+const OUTPUT_HEADERS = ['*客戶代號','客戶名稱','*客戶貨號','客戶商品名稱','客戶規格單位','*單價','備註','產區/品種','裝箱方式','包裝資材','產地','不報價原因','變價原因'];
+const OUTPUT_FIELD_ORDER = [null, null, '貨號', '品名', '單位', '單價', '備註', '產區品種', '裝箱方式', '包裝資材', '產地', '不報價原因', '變價原因'];
+
+const QUOTE_CYCLE_DAYS = { '7天': 7, '10天': 10, '15天': 15, '30天': 30 };
+
+// Supabase 的 timestamptz 欄位回傳的是標準 ISO 字串（例如 2026-09-06T01:43:00+00:00），
+// 用原生 Date 建構子就能正確解析，不再需要自己拼格式，也不會有 Google Sheets 自動轉型的問題。
+function parseDateLoose(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
 }
-</style>
-</head>
-<body>
+function formatDateShort(d) {
+  if (!d) return '';
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+}
+// 依「報價週期」與「最後匯出時間」計算到期日：never(從沒匯出過) / active(有效期內) / overdue(逾期未匯出)
+function computeDueInfo(c) {
+  const days = QUOTE_CYCLE_DAYS[c.quoteCycle] || 7;
+  const last = parseDateLoose(c.lastExportTime);
+  if (!last) return { state: 'never', due: null };
+  const due = new Date(last.getTime());
+  due.setDate(due.getDate() + days);
+  const now = new Date();
+  return { state: now >= due ? 'overdue' : 'active', due };
+}
+// 匯出狀態徽章：二元顯示（已匯出/尚未匯出），never 與 overdue 都視為「尚未匯出」
+function computeExportBadge(c) {
+  const info = computeDueInfo(c);
+  if (info.state === 'active') return { label: '已匯出', cls: 'badge-green', due: info.due, overdue: false };
+  return { label: '尚未匯出', cls: 'badge-red', due: info.due, overdue: info.state === 'overdue' };
+}
 
-<div class="shell">
-  <div class="topbar">
-    <div class="brand-mark">
-      <div class="glyph">
-        <img src="data:image/png;base64,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" width="24" height="24" alt="" style="display:block;">
-      </div>
-      <div>
-        <h1>報價單匯出系統</h1>
-        <p>匯入客戶原始報價單 → 轉換為標準匯入格式並匯出</p>
-      </div>
-    </div>
-  </div>
+let state = {
+  customers: [],
+  activeTab: 'hasCode', // hasCode | noCode
+  statFilter: 'all', // all | exported | notExported | notConfigured
+  cycleFilter: 'all', // all | 7天 | 10天 | 15天 | 30天
+  search: '',
+  masterItems: [], // {itemCode, itemName, unit}[] — 全公司共用，切到「無貨號客戶」頁籤時載入
+  selectedCodes: new Set(), // 目前頁籤內被勾選、供批次修改／批次刪除使用的客戶代號
+  wizard: null, // 見 openWizard()
+  lookupWizard: null // 見 openLookupWizard()（無貨號客戶：上傳料號對照表）
+};
 
-  <div class="tab-row" id="tabRow">
-    <button class="tab-btn active" data-tab="hasCode">有貨號客戶</button>
-    <button class="tab-btn" data-tab="noCode">無貨號客戶</button>
-  </div>
+/* ---------------- 資料列轉換：Supabase 的 snake_case 欄位 → 前端慣用的 camelCase ---------------- */
+function rowToCustomer(row) {
+  return {
+    code: row.code,
+    name: row.name || '',
+    quoteCycle: row.quote_cycle || '7天',
+    tradeStatus: row.trade_status || '核准交易',
+    exportStatus: row.export_status || '未匯出',
+    lastExportTime: row.last_export_time || '',
+    lastExportFileName: row.last_export_filename || '',
+    mapping: row.mapping || null,
+    productCodeMode: row.product_code_mode || '有貨號',
+    lastExportItemCount: row.last_export_item_count || 0,
+    itemCodeLookupCount: row.item_code_lookup_count || 0
+  };
+}
 
-  <div id="masterItemsPanel" style="display:none;align-items:center;gap:12px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:16px;">
-    <div style="flex:1;">
-      <div style="font-weight:700;font-size:13.5px;">忠欣品項主檔（全公司共用）</div>
-      <div class="hint">無貨號客戶的品項比對，都是拿客戶的料號對照表去對這份主檔的料號。目前共 <span id="masterItemsCount" class="mono">0</span> 筆。</div>
-    </div>
-    <button class="btn btn-secondary" id="btnMasterItems">上傳／更新主檔</button>
-  </div>
+/* ---------------- API（Supabase：讀取） ---------------- */
+async function loadCustomers(showLoading) {
+  if (showLoading) setLoading(true, '載入客戶資料…');
+  try {
+    assertSb();
+    // last_item_codes／item_code_lookup 故意不列在這裡：這兩個欄位只有匯出/比對當下才需要，
+    // 客戶數一多、每次輪詢都帶著全部客戶的完整清單會浪費頻寬，改成用到才單獨查
+    // （見 fetchPreviousCodes／fetchItemCodeLookup）。item_code_lookup_count 只是筆數，很輕量，直接帶著沒關係。
+    const { data, error } = await sb
+      .from('customers')
+      .select('code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count')
+      .order('code');
+    if (error) throw new Error(error.message);
+    state.customers = (data || []).map(rowToCustomer);
+    renderTable();
+    renderStats();
+  } catch (err) {
+    toast('err', '載入失敗：' + err.message);
+  } finally {
+    if (showLoading) setLoading(false);
+  }
+}
 
-  <div class="stat-row" id="statCards">
-    <div class="stat-card active" data-filter="all"><span class="n mono">0</span><span class="l">客戶總數</span></div>
-    <div class="stat-card" data-filter="exported"><span class="n mono" style="color:var(--green-ok);">0</span><span class="l">已匯出</span></div>
-    <div class="stat-card" data-filter="notExported"><span class="n mono" style="color:var(--red-bad);">0</span><span class="l">尚未匯出</span></div>
-    <div class="stat-card" data-filter="notConfigured"><span class="n mono" style="color:var(--red-bad);">0</span><span class="l">尚未設定</span></div>
-  </div>
+// Realtime：資料在任何裝置異動時，Supabase 會主動推播通知，收到就重新整理一次，
+// 不必再像過去那樣高度依賴輪詢；下面仍保留一個低頻率輪詢當作保險（例如忘了在後台開 Realtime 時）。
+let realtimeChannel = null;
+function setupRealtime() {
+  if (!sb || realtimeChannel) return;
+  try {
+    realtimeChannel = sb.channel('customers-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => {
+        loadCustomers(false);
+      })
+      .subscribe();
+  } catch (err) {
+    console.warn('Realtime 訂閱失敗（不影響基本功能，仍會靠輪詢同步）：', err);
+  }
+}
 
-  <div class="toolbar">
-    <div class="search-box">
-      <input type="text" id="searchInput" placeholder="搜尋客戶代號或名稱…">
-    </div>
-    <button class="btn btn-ghost" id="btnResetAll">重置本期匯出狀態</button>
-    <button class="btn btn-secondary" id="btnBatchImport">批次匯入客戶</button>
-    <button class="btn btn-secondary" id="btnBatchQuotes">批次匯入報價單</button>
-    <button class="btn btn-secondary" id="btnAddCustomer">＋ 新增客戶</button>
-    <button class="btn btn-secondary" id="btnBatchEdit" disabled>批次修改</button>
-    <button class="btn btn-danger-outline" id="btnBatchDelete" disabled>批次刪除</button>
-  </div>
+/* ---------------- 共用 UI 工具 ---------------- */
+function setLoading(on, text) {
+  const ov = document.getElementById('loadingOverlay');
+  if (text) document.getElementById('loadingText').textContent = text;
+  ov.classList.toggle('open', !!on);
+}
+function toast(kind, msg) {
+  const wrap = document.getElementById('toastWrap');
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind === 'err' ? ' err' : kind === 'ok' ? ' ok' : '');
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(() => { el.style.transition = 'opacity .25s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 260); }, 3200);
+}
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('[data-close]').forEach(btn => {
+  btn.addEventListener('click', () => closeModal(btn.getAttribute('data-close')));
+});
+document.querySelectorAll('.overlay').forEach(ov => {
+  ov.addEventListener('click', e => { if (e.target === ov) closeModal(ov.id); });
+});
 
-  <div class="table-wrap">
-    <table id="custTable">
-      <thead id="tableHead"></thead>
-      <tbody id="custTbody"></tbody>
-    </table>
-    <div class="empty-state" id="emptyState" style="display:none;">
-      <div class="glyph">📋</div>
-      <h3>還沒有客戶資料</h3>
-      <p>請先「新增客戶」或「批次匯入客戶」建立客戶主檔</p>
-    </div>
-  </div>
-  <div style="text-align:right;margin-top:10px;font-size:11px;color:var(--ink-soft);" class="mono">前端版本 <span id="frontendVersionStamp"></span></div>
-</div>
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+// 清掉常見的數值雜訊：千分位逗號、貨幣符號、多餘空白、括號表示的負數（會計格式）
+function cleanNumericString(v) {
+  if (v == null) return '';
+  let s = String(v).trim();
+  if (!s) return '';
+  const negParen = /^\((.+)\)$/.exec(s);
+  if (negParen) s = '-' + negParen[1];
+  s = s.replace(/[,$￥\s]|NT\$?/gi, '');
+  return s;
+}
+function toNumberIfPossible(v) {
+  if (v === '' || v == null) return null;
+  const cleaned = cleanNumericString(v);
+  if (cleaned === '') return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : v;
+}
 
-<!-- 欄位篩選選單（共用一個，動態定位與內容） -->
-<div class="row-menu" id="colFilterMenu"></div>
+/* ---------------- 延遲載入大型函式庫（加快首次進入頁面速度） ---------------- */
+const _loadedScripts = {};
+function loadScriptOnce(url) {
+  if (_loadedScripts[url]) return _loadedScripts[url];
+  _loadedScripts[url] = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = url;
+    s.onload = () => resolve();
+    s.onerror = () => { delete _loadedScripts[url]; reject(new Error('資源載入失敗：' + url)); };
+    document.head.appendChild(s);
+  });
+  return _loadedScripts[url];
+}
+function ensureXLSX() {
+  if (typeof XLSX !== 'undefined') return Promise.resolve();
+  return loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+}
+function ensureExcelJS() {
+  return Promise.all([
+    typeof ExcelJS !== 'undefined' ? Promise.resolve() : loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'),
+    typeof saveAs !== 'undefined' ? Promise.resolve() : loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js')
+  ]);
+}
 
-<!-- ============ 新增/編輯客戶 Modal ============ -->
-<div class="overlay" id="ovCustomer">
-  <div class="modal">
-    <div class="modal-head">
-      <div>
-        <h2 id="custModalTitle">新增客戶</h2>
-        <div class="sub">建立客戶代號與名稱，供報價單匯入比對</div>
-      </div>
-      <button class="modal-close" data-close="ovCustomer">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="field-row">
-        <div class="field">
-          <label>客戶代號 *</label>
-          <input type="text" id="custCode" placeholder="例如 C001">
-        </div>
-        <div class="field">
-          <label>客戶名稱</label>
-          <input type="text" id="custName" placeholder="例如 台灣善美的">
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>報價種類</label>
-          <select id="custProductCodeMode">
-            <option value="有貨號">有貨號</option>
-            <option value="無貨號">無貨號</option>
-          </select>
-          <div class="hint">是否有客戶貨號欄位；若「無貨號」，比對品項改用商品名稱</div>
-        </div>
-        <div class="field">
-          <label>報價週期</label>
-          <select id="custQuoteCycle">
-            <option value="7天">7天</option>
-            <option value="10天">10天</option>
-            <option value="15天">15天</option>
-            <option value="30天">30天</option>
-          </select>
-          <div class="hint">到期日 = 最後匯出日 + 週期天數</div>
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>匯出狀態</label>
-          <select id="custExportStatus">
-            <option value="未匯出">尚未匯出</option>
-            <option value="已匯出">已匯出</option>
-          </select>
-          <div class="hint">手動調整時，若切換為「已匯出」會以現在時間重新計算到期日</div>
-        </div>
-        <div class="field"></div>
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn btn-ghost" data-close="ovCustomer">取消</button>
-      <button class="btn btn-primary" id="btnSaveCustomer">儲存</button>
-    </div>
-  </div>
-</div>
+/* ---------------- 讀取 Excel 檔為原始二維陣列 ---------------- */
+async function readWorkbookRaw(file) {
+  await ensureXLSX();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: 'array', cellDates: false });
+        const firstSheetName = wb.SheetNames[0];
+        const ws = wb.Sheets[firstSheetName];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+        // 客戶的報價單常常會用 Excel「隱藏列」處理不報價/停用的品項，這種列不該被當成資料匯入。
+        // 偵測隱藏列並清空內容，讓既有「整列空白就跳過」的邏輯自然把它們排除掉。
+        const rowMeta = ws['!rows'] || [];
+        let hiddenCount = 0;
+        rowMeta.forEach((meta, idx) => {
+          if (meta && meta.hidden && rows[idx] && rows[idx].some(c => String(c || '').trim() !== '')) {
+            rows[idx] = [];
+            hiddenCount++;
+          }
+        });
+        resolve({ sheetName: firstSheetName, rows, hiddenCount });
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = () => reject(new Error('檔案讀取失敗'));
+    reader.readAsArrayBuffer(file);
+  });
+}
 
-<!-- ============ 批次匯入客戶 Modal ============ -->
-<div class="overlay" id="ovBatch">
-  <div class="modal">
-    <div class="modal-head">
-      <div>
-        <h2>批次匯入客戶</h2>
-        <div class="sub">上傳 Excel，第一列為標題：客戶代號、客戶名稱、報價種類、報價週期、匯出狀態</div>
-      </div>
-      <button class="modal-close" data-close="ovBatch">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="dropzone" id="batchDropzone">
-        <strong>點擊選擇檔案</strong> 或拖曳 Excel 檔案到此處<br>只有「客戶代號」是必要欄位，其餘欄位缺少時會用預設值（有貨號／7天／尚未匯出）
-        <input type="file" id="batchFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
-      </div>
-      <div id="batchPreviewWrap" style="margin-top:14px;display:none;">
-        <div class="hint" id="batchSummary" style="margin-bottom:8px;"></div>
-        <div class="preview-scroll"><table id="batchPreviewTable"></table></div>
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn btn-ghost" data-close="ovBatch">取消</button>
-      <button class="btn btn-primary" id="btnConfirmBatch" disabled>確認匯入</button>
-    </div>
-  </div>
-</div>
+/* ---------------- 品項清單（用於比對新增品項） ---------------- */
+async function fetchPreviousCodes(code) {
+  try {
+    assertSb();
+    const { data, error } = await sb.from('customers').select('last_item_codes').eq('code', code).maybeSingle();
+    if (error || !data) return [];
+    return Array.isArray(data.last_item_codes) ? data.last_item_codes : [];
+  } catch (err) { return []; }
+}
 
-<!-- ============ 批次匯入報價單 Modal ============ -->
-<div class="overlay" id="ovBatchQuotes">
-  <div class="modal wide">
-    <div class="modal-head">
-      <div>
-        <h2>批次匯入報價單</h2>
-        <div class="sub">依檔名自動比對「已設定匯出格式」的客戶，一次匯出多家報價單</div>
-      </div>
-      <button class="modal-close" data-close="ovBatchQuotes">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="dropzone" id="batchQuotesDropzone">
-        拖曳多個報價單檔案到此處<br>檔名需包含客戶代號或客戶名稱才能自動辨識；可以分好幾次選取或拖曳，會自動累加、不會蓋掉之前選的
-        <input type="file" id="batchQuotesFileInput" accept=".xlsx,.xls,.csv" multiple style="display:none;">
-        <input type="file" id="batchQuotesFolderInput" webkitdirectory directory multiple style="display:none;">
-      </div>
-      <div style="display:flex;gap:8px;margin-top:10px;">
-        <button class="btn btn-secondary small" id="btnBatchQuotesPickFiles">選擇檔案</button>
-        <button class="btn btn-secondary small" id="btnBatchQuotesPickFolder">選擇資料夾</button>
-        <button class="btn btn-ghost small" id="btnBatchQuotesClear">清空清單</button>
-      </div>
-      <div id="batchQuotesPreviewWrap" style="margin-top:14px;display:none;">
-        <div class="hint" id="batchQuotesSummary" style="margin-bottom:8px;"></div>
-        <div class="preview-scroll"><table id="batchQuotesPreviewTable"></table></div>
-      </div>
-      <div id="batchQuotesProgressWrap" style="margin-top:14px;display:none;">
-        <div class="hint" id="batchQuotesProgress"></div>
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn btn-ghost" data-close="ovBatchQuotes">取消</button>
-      <button class="btn btn-export" id="btnConfirmBatchQuotes" disabled>開始批次匯出</button>
-    </div>
-  </div>
-</div>
+/* ---------------- 無貨號客戶：料號對照（客戶品名 → 忠欣料號） ---------------- */
+async function fetchItemCodeLookup(code) {
+  try {
+    assertSb();
+    const { data, error } = await sb.from('customers').select('item_code_lookup').eq('code', code).maybeSingle();
+    if (error || !data) return [];
+    return Array.isArray(data.item_code_lookup) ? data.item_code_lookup : [];
+  } catch (err) { return []; }
+}
+// 整份取代（不是合併）：使用者重新上傳，代表要用新的那份為準
+async function saveItemCodeLookup(code, lookupArray) {
+  assertSb();
+  const { data, error } = await sb.from('customers').update({
+    item_code_lookup: lookupArray, updated_at: new Date().toISOString()
+  }).eq('code', code).select('code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count').single();
+  if (error) throw new Error(error.message);
+  return rowToCustomer(data);
+}
 
-<!-- ============ 查看紀錄 Modal ============ -->
-<div class="overlay" id="ovHistory">
-  <div class="modal">
-    <div class="modal-head">
-      <div>
-        <h2 id="historyTitle">匯出紀錄</h2>
-        <div class="sub">此客戶最近一次匯出的相關資訊</div>
-      </div>
-      <button class="modal-close" data-close="ovHistory">✕</button>
-    </div>
-    <div class="modal-body">
-      <table class="kv-table" id="historyTable"></table>
-    </div>
-    <div class="modal-foot">
-      <button class="btn btn-ghost" data-close="ovHistory">關閉</button>
-    </div>
-  </div>
-</div>
+/* ---------------- 忠欣品項主檔（全公司共用） ---------------- */
+async function loadMasterItems() {
+  try {
+    assertSb();
+    const { data, error } = await sb.from('master_items').select('item_code,item_name,unit').order('item_code');
+    if (error) throw new Error(error.message);
+    state.masterItems = (data || []).map(r => ({ itemCode: r.item_code, itemName: r.item_name || '', unit: r.unit || '' }));
+    const countEl = document.getElementById('masterItemsCount');
+    if (countEl) countEl.textContent = state.masterItems.length;
+  } catch (err) {
+    toast('err', '載入忠欣品項主檔失敗：' + err.message);
+  }
+}
+// 整份取代：刪掉舊的、寫入新的（主檔用 code 當 key，這裡直接整批 upsert；
+// 若使用者上傳的檔案刪掉了某些舊料號，舊料號仍會留著，畢竟不確定是真的下架還是漏帶，
+// 由使用者自行到 Supabase 後台刪除比較保險）
+async function saveMasterItems(rows) {
+  assertSb();
+  const payload = rows.map(r => ({ item_code: r.itemCode, item_name: r.itemName, unit: r.unit, updated_at: new Date().toISOString() }));
+  const CHUNK = 500;
+  for (let i = 0; i < payload.length; i += CHUNK) {
+    const chunk = payload.slice(i, i + CHUNK);
+    const { error } = await sb.from('master_items').upsert(chunk, { onConflict: 'item_code' });
+    if (error) throw new Error(error.message);
+  }
+  await loadMasterItems();
+}
 
-<!-- ============ 忠欣品項主檔 上傳/更新 Modal ============ -->
-<div class="overlay" id="ovMasterItems">
-  <div class="modal">
-    <div class="modal-head">
-      <div>
-        <h2>忠欣品項主檔</h2>
-        <div class="sub">全公司共用，料號的正式來源；上傳會整份取代目前的主檔</div>
-      </div>
-      <button class="modal-close" data-close="ovMasterItems">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="dropzone" id="masterItemsDropzone">
-        <strong>點擊選擇檔案</strong> 或拖曳 Excel 檔案到此處<br>第一列為標題，需包含「料號」「品項名稱」「單位」欄位
-        <input type="file" id="masterItemsFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
-      </div>
-      <div id="masterItemsPreviewWrap" style="margin-top:14px;display:none;">
-        <div class="hint" id="masterItemsSummary" style="margin-bottom:8px;"></div>
-        <div class="preview-scroll"><table id="masterItemsPreviewTable"></table></div>
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn btn-ghost" data-close="ovMasterItems">取消</button>
-      <button class="btn btn-primary" id="btnConfirmMasterItems" disabled>確認匯入（整份取代）</button>
-    </div>
-  </div>
-</div>
+// 核心轉換：套用欄位對應 + 無單價自動補0 + 與上次匯出比對新增品項，回傳排序後的紀錄陣列
+// itemCodeLookup：該客戶自己的「客戶品名 → 忠欣料號」對照（只有無貨號客戶會用到）
+// masterItems：忠欣品項主檔（全公司共用），用比對到的料號回填官方單位
+function buildConvertedRecords(rawRows, dataStartRowIdx, columnMap, productCodeMode, previousCodes, itemCodeLookup, masterItems) {
+  const identityField = getIdentityField(productCodeMode);
+  const prevSet = new Set(previousCodes || []);
+  const noCode = productCodeMode === '無貨號';
+  const lookupMap = new Map((itemCodeLookup || []).map(x => [x.name, x.code]));
+  const masterMap = new Map((masterItems || []).map(m => [m.itemCode, m]));
+  const recs = [];
+  for (let r = dataStartRowIdx; r < rawRows.length; r++) {
+    const row = rawRows[r] || [];
+    if (row.every(c => String(c == null ? '' : c).trim() === '')) continue;
+    const rec = {};
+    Object.keys(columnMap).forEach(idxStr => {
+      const idx = +idxStr, field = columnMap[idxStr];
+      let v = row[idx]; v = v == null ? '' : String(v).trim();
+      rec[field] = v;
+    });
+    if (!rec[identityField]) continue;
+    if (!rec['單價'] || !String(rec['單價']).trim()) rec['單價'] = '0'; // 無單價自動補0
+    if (noCode) {
+      const matchedCode = lookupMap.get(rec['品名']);
+      if (matchedCode) {
+        rec['貨號'] = matchedCode;
+        rec._unmatched = false;
+        const master = masterMap.get(matchedCode);
+        if (master && !rec['單位']) rec['單位'] = master.unit; // 客戶沒填單位時，用忠欣官方單位補上
+      } else {
+        rec['貨號'] = '';
+        rec._unmatched = true;
+      }
+    }
+    rec._isNew = prevSet.size > 0 ? !prevSet.has(rec[identityField]) : false;
+    recs.push(rec);
+  }
+  // 排序：一般品項 → 新增品項(黃底) → 比對不到料號(橘底，最需要處理，排最後最顯眼)
+  recs.sort((a, b) => {
+    const rank = x => x._unmatched ? 2 : (x._isNew ? 1 : 0);
+    return rank(a) - rank(b);
+  });
+  return recs;
+}
 
-<!-- ============ 客戶料號對照表 上傳 Modal ============ -->
-<div class="overlay" id="ovLookup">
-  <div class="modal">
-    <div class="modal-head">
-      <div>
-        <h2 id="lookupTitle">上傳料號對照表</h2>
-        <div class="sub">這個客戶自己的「客戶品名 → 忠欣料號」對照表；上傳會整份取代</div>
-      </div>
-      <button class="modal-close" data-close="ovLookup">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="dropzone" id="lookupDropzone">
-        <strong>點擊選擇檔案</strong> 或拖曳 Excel 檔案到此處<br>第一列為標題，需包含「客戶品名」「料號」欄位
-        <input type="file" id="lookupFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
-      </div>
-      <div id="lookupPreviewWrap" style="margin-top:14px;display:none;">
-        <div class="hint" id="lookupSummary" style="margin-bottom:8px;"></div>
-        <div class="preview-scroll"><table id="lookupPreviewTable"></table></div>
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn btn-ghost" data-close="ovLookup">取消</button>
-      <button class="btn btn-primary" id="btnConfirmLookup" disabled>確認匯入（整份取代）</button>
-    </div>
-  </div>
-</div>
+async function exportWorkbook(customer, records) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('匯入格式');
+  const FONT_NAME = '微軟正黑體';
+  const FONT_SIZE = 11;
+  // 效能關鍵：樣式物件在迴圈外先建立好、重複參照使用，不要每個儲存格都 new 一個新物件——
+  // 幾百列 x 13 欄下來，光是物件配置(GC 壓力)就佔掉不少時間。ExcelJS 支援共用同一個樣式物件參照。
+  const THIN = { style: 'thin', color: { argb: 'FF000000' } };
+  const BORDER = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+  const FONT_NORMAL = { name: FONT_NAME, size: FONT_SIZE };
+  const FONT_NEW = { name: FONT_NAME, size: FONT_SIZE, color: { argb: 'FFFF524D' } };
+  const FONT_UNMATCHED = { name: FONT_NAME, size: FONT_SIZE, color: { argb: 'FFB35400' } };
+  const ALIGN_DEFAULT = { vertical: 'middle' };
+  const ALIGN_LEFT = { vertical: 'middle', horizontal: 'left' };
+  const FILL_NEW = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFDE5A' } };
+  const FILL_UNMATCHED = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE6D1' } };
 
-<!-- ============ 批次修改 Modal ============ -->
-<div class="overlay" id="ovBatchEdit">
-  <div class="modal">
-    <div class="modal-head">
-      <div>
-        <h2>批次修改</h2>
-        <div class="sub" id="batchEditSub">已選擇 0 筆客戶</div>
-      </div>
-      <button class="modal-close" data-close="ovBatchEdit">✕</button>
-    </div>
-    <div class="modal-body">
-      <p class="hint" style="margin-bottom:14px;">勾選要修改的欄位，沒勾選的欄位維持原樣不變。</p>
-      <div class="field">
-        <label><input type="checkbox" id="beApplyMode" style="width:auto;margin-right:6px;">報價種類</label>
-        <select id="beMode" disabled>
-          <option value="有貨號">有貨號</option>
-          <option value="無貨號">無貨號</option>
-        </select>
-      </div>
-      <div class="field">
-        <label><input type="checkbox" id="beApplyCycle" style="width:auto;margin-right:6px;">報價週期</label>
-        <select id="beCycle" disabled>
-          <option value="7天">7天</option>
-          <option value="10天">10天</option>
-          <option value="15天">15天</option>
-          <option value="30天">30天</option>
-        </select>
-      </div>
-      <div class="field">
-        <label><input type="checkbox" id="beApplyStatus" style="width:auto;margin-right:6px;">匯出狀態</label>
-        <select id="beStatus" disabled>
-          <option value="未匯出">尚未匯出</option>
-          <option value="已匯出">已匯出</option>
-        </select>
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn btn-ghost" data-close="ovBatchEdit">取消</button>
-      <button class="btn btn-primary" id="btnConfirmBatchEdit">套用</button>
-    </div>
-  </div>
-</div>
+  const headerRow = ws.addRow(OUTPUT_HEADERS);
+  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    cell.font = FONT_NORMAL;
+    cell.border = BORDER;
+    cell.alignment = colNumber === 3 ? ALIGN_LEFT : ALIGN_DEFAULT;
+  });
 
-<!-- ============ 上傳報價單 / 對應精靈 Modal ============ -->
-<div class="overlay" id="ovWizard">
-  <div class="modal wide">
-    <div class="modal-head">
-      <div>
-        <h2 id="wizardTitle">上傳報價單</h2>
-        <div class="sub" id="wizardSub"></div>
-      </div>
-      <button class="modal-close" data-close="ovWizard">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="wizard-steps">
-        <div class="step" data-step="1"></div>
-        <div class="step" data-step="2"></div>
-        <div class="step" data-step="3"></div>
-      </div>
+  const widths = [12, 16, 12, 26, 14, 10, 16, 14, 14, 14, 10, 14, 14];
+  ws.columns = widths.map(w => ({ width: w }));
 
-      <!-- Step 1: 上傳檔案 -->
-      <div class="wiz-panel" data-panel="1">
-        <div class="dropzone" id="wizDropzone">
-          <strong>點擊選擇檔案</strong> 或拖曳客戶原始報價單到此處<br>支援 .xlsx / .xls
-          <input type="file" id="wizFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
-        </div>
-      </div>
+  // 效能關鍵：先把所有列的值組成二維陣列，一次用 addRows 批次插入，
+  // 比逐列呼叫 addRow 快上不少（ExcelJS 內部對批次插入有做優化）。
+  const rowValues = records.map(rec => [
+    customer.code,
+    customer.name || '',
+    rec['貨號'] || '',
+    rec['品名'] || '',
+    rec['單位'] || '',
+    toNumberIfPossible(rec['單價']),
+    rec['備註'] || '',
+    rec['產區品種'] || '',
+    rec['裝箱方式'] || '',
+    rec['包裝資材'] || '',
+    rec['產地'] || '',
+    rec['不報價原因'] || '',
+    rec['變價原因'] || ''
+  ]);
+  const addedRows = ws.addRows(rowValues);
+  addedRows.forEach((row, i) => {
+    const rec = records[i];
+    row.getCell(3).numFmt = '@';
+    const font = rec._unmatched ? FONT_UNMATCHED : (rec._isNew ? FONT_NEW : FONT_NORMAL);
+    const fill = rec._unmatched ? FILL_UNMATCHED : (rec._isNew ? FILL_NEW : null);
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      cell.font = font;
+      cell.border = BORDER;
+      cell.alignment = colNumber === 3 ? ALIGN_LEFT : ALIGN_DEFAULT;
+      if (fill) cell.fill = fill;
+    });
+  });
 
-      <!-- Step 2: 欄位對應 -->
-      <div class="wiz-panel" data-panel="2" style="display:none;">
-        <p class="hint" style="margin-bottom:10px;">點選「資料從此列開始」標記第一筆品項所在的列，接著為每一欄指定對應的目標欄位。</p>
-        <div class="preview-scroll" id="wizMapPreviewWrap"><table id="wizMapPreviewTable"></table></div>
-        <div class="map-grid" id="wizMapGrid" style="margin-top:16px;"></div>
-        <div class="field" style="margin-top:14px;">
-          <label><input type="checkbox" id="wizSaveMapping" checked style="width:auto;margin-right:6px;">將此對應方式儲存為此客戶的範本，下次自動套用</label>
-        </div>
-      </div>
+  const buf = await wb.xlsx.writeBuffer();
+  const today = new Date();
+  const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+  const outName = `${customer.code}_${customer.name || ''}_報價單匯入_${stamp}.xlsx`;
+  saveAs(new Blob([buf], { type: 'application/octet-stream' }), outName);
+  return outName;
+}
 
-      <!-- Step 3: 預覽結果 -->
-      <div class="wiz-panel" data-panel="3" style="display:none;">
-        <div class="result-summary" id="wizResultSummary"></div>
-        <div class="preview-scroll" id="wizResultPreviewWrap"><table id="wizResultPreviewTable"></table></div>
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn btn-ghost" id="wizBack" style="display:none;">上一步</button>
-      <div style="flex:1;"></div>
-      <button class="btn btn-ghost" data-close="ovWizard">取消</button>
-      <button class="btn btn-primary" id="wizNext">下一步</button>
-      <button class="btn btn-export" id="wizExport" style="display:none;">匯出並標記已匯出</button>
-    </div>
-  </div>
-</div>
+// 匯出成功後：更新匯出狀態，並把這次的品項識別值存起來供下次比對「新增品項」用。
+// Supabase 的 jsonb 欄位沒有 GAS 網址長度那種限制，一次寫入即可，不用再分批。
+async function persistExportResult(customer, records, outName) {
+  assertSb();
+  const identityField = getIdentityField(customer.productCodeMode);
+  const codes = records.map(r => r[identityField]).filter(Boolean);
+  const { data, error } = await sb.from('customers').update({
+    export_status: '已匯出',
+    last_export_time: new Date().toISOString(),
+    last_export_filename: outName,
+    last_export_item_count: records.length,
+    last_item_codes: codes,
+    updated_at: new Date().toISOString()
+  }).eq('code', customer.code).select().single();
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, customer: rowToCustomer(data) };
+}
 
-<div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
-<div class="toast-wrap" id="toastWrap"></div>
+/* ---------------- 統計與表格渲染 ---------------- */
+function renderStats() {
+  const wantMode = state.activeTab === 'noCode' ? '無貨號' : '有貨號';
+  const inTab = state.customers.filter(c => c.productCodeMode === wantMode);
+  const total = inTab.length;
+  let exportedN = 0, notExportedN = 0, notConfiguredN = 0;
+  inTab.forEach(c => {
+    const info = computeDueInfo(c);
+    if (info.state === 'active') exportedN++; else notExportedN++;
+    if (!c.mapping) notConfiguredN++;
+  });
+  const setN = (sel, v) => { const el = document.querySelector(sel); if (el) el.textContent = v; };
+  setN('#statCards [data-filter="all"] .n', total);
+  setN('#statCards [data-filter="exported"] .n', exportedN);
+  setN('#statCards [data-filter="notExported"] .n', notExportedN);
+  setN('#statCards [data-filter="notConfigured"] .n', notConfiguredN);
+}
 
-<script src="app.js?v=2026-09-10-supabase-v6"></script>
-</body>
-</html>
+function filteredCustomers() {
+  const kw = state.search.trim().toLowerCase();
+  const wantMode = state.activeTab === 'noCode' ? '無貨號' : '有貨號';
+  return state.customers.filter(c => {
+    if (c.productCodeMode !== wantMode) return false;
+    const info = computeDueInfo(c);
+    if (state.statFilter === 'exported' && info.state !== 'active') return false;
+    if (state.statFilter === 'notExported' && info.state === 'active') return false;
+    if (state.statFilter === 'notConfigured' && c.mapping) return false;
+    if (state.cycleFilter !== 'all' && c.quoteCycle !== state.cycleFilter) return false;
+    if (kw && !(String(c.code).toLowerCase().includes(kw) || String(c.name).toLowerCase().includes(kw))) return false;
+    return true;
+  });
+}
+
+// 兩個頁籤欄位不一樣（無貨號多一欄「料號對照表」、少一欄「報價種類」，報價種類已經由頁籤本身區分），
+// 用頁籤決定要渲染哪一版表頭，而不是寫兩份幾乎重複的 HTML。
+function renderTableHead() {
+  const thead = document.getElementById('tableHead');
+  if (!thead) return;
+  const cycleFilterBtn = `
+    <button class="th-filter-btn" data-filter-col="quoteCycle" aria-label="篩選報價週期" title="篩選">
+      <svg viewBox="0 0 16 16" width="11" height="11"><path d="M1 2h14l-5 6v5l-4 2v-7z" fill="currentColor"/></svg>
+    </button>`;
+  const selectAllTh = `<th class="selcol"><input type="checkbox" id="selectAllCheckbox" title="全選"></th>`;
+  if (state.activeTab === 'noCode') {
+    thead.innerHTML = `<tr>
+      ${selectAllTh}
+      <th style="width:100px;">客戶代號</th>
+      <th style="width:200px;">客戶名稱</th>
+      <th style="width:100px;">報價週期 ${cycleFilterBtn}</th>
+      <th style="width:110px;">料號對照表</th>
+      <th style="width:100px;">匯出格式</th>
+      <th style="width:150px;">匯出狀態</th>
+      <th style="width:340px;">操作</th>
+      <th></th>
+    </tr>`;
+  } else {
+    thead.innerHTML = `<tr>
+      ${selectAllTh}
+      <th style="width:100px;">客戶代號</th>
+      <th style="width:200px;">客戶名稱</th>
+      <th style="width:100px;">報價週期 ${cycleFilterBtn}</th>
+      <th style="width:100px;">匯出格式</th>
+      <th style="width:150px;">匯出狀態</th>
+      <th style="width:280px;">操作</th>
+      <th></th>
+    </tr>`;
+  }
+  updateFilterIconStates();
+}
+
+function renderTable() {
+  const list = filteredCustomers();
+  const tbody = document.getElementById('custTbody');
+  const empty = document.getElementById('emptyState');
+  if (!list.length) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    empty.querySelector('h3').textContent = state.customers.length ? '找不到符合的客戶' : '還沒有客戶資料';
+    empty.querySelector('p').textContent = state.customers.length ? '試試調整搜尋或篩選條件' : '請先「新增客戶」或「批次匯入客戶」建立客戶主檔';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = list.map(c => {
+    const exp = computeExportBadge(c);
+    const mapSet = !!c.mapping;
+    const mapBadge = mapSet ? `<span class="badge badge-green">已設定</span>` : `<span class="badge badge-red">尚未設定</span>`;
+    const expBadge = `<span class="badge ${exp.cls}">${exp.label}</span>` +
+      (exp.due ? `<div class="hint" style="margin-top:3px;">${exp.overdue ? '⚠ 已逾期 ' : '到期 '}${formatDateShort(exp.due)}</div>` : '');
+    const actionBtn = mapSet
+      ? `<button class="btn small btn-export" data-act="export" data-code="${escapeHtml(c.code)}">匯出報價單</button>`
+      : `<button class="btn small btn-upload" data-act="upload" data-code="${escapeHtml(c.code)}">上傳報價單</button>`;
+    const checked = state.selectedCodes.has(c.code) ? 'checked' : '';
+    const checkboxCell = `<td class="selcol"><input type="checkbox" class="rowCheckbox" data-code="${escapeHtml(c.code)}" ${checked}></td>`;
+    const textLinks = `
+        <button class="text-link" data-act="history" data-code="${escapeHtml(c.code)}">查看紀錄</button>
+        <button class="text-link" data-act="edit" data-code="${escapeHtml(c.code)}">編輯</button>
+        <button class="text-link" data-act="reconfigure" data-code="${escapeHtml(c.code)}">重新設定欄位對應</button>
+        <button class="text-link danger" data-act="delete" data-code="${escapeHtml(c.code)}">刪除</button>`;
+
+    if (state.activeTab === 'noCode') {
+      const lookupCount = c.itemCodeLookupCount || 0;
+      const lookupBadge = lookupCount > 0
+        ? `<span class="badge badge-green">已設定</span><div class="hint" style="margin-top:3px;">${lookupCount} 筆</div>`
+        : `<span class="badge badge-red">尚未設定</span>`;
+      return `<tr>
+        ${checkboxCell}
+        <td class="code">${escapeHtml(c.code)}</td>
+        <td>${escapeHtml(c.name)}</td>
+        <td class="mono" style="font-size:12.5px;">${escapeHtml(c.quoteCycle)}</td>
+        <td>${lookupBadge}</td>
+        <td>${mapBadge}</td>
+        <td>${expBadge}</td>
+        <td class="actions">
+          ${actionBtn}
+          <button class="text-link" data-act="lookup" data-code="${escapeHtml(c.code)}">上傳料號對照表</button>
+          ${textLinks}
+        </td>
+        <td></td>
+      </tr>`;
+    }
+    return `<tr>
+      ${checkboxCell}
+      <td class="code">${escapeHtml(c.code)}</td>
+      <td>${escapeHtml(c.name)}</td>
+      <td class="mono" style="font-size:12.5px;">${escapeHtml(c.quoteCycle)}</td>
+      <td>${mapBadge}</td>
+      <td>${expBadge}</td>
+      <td class="actions">
+        ${actionBtn}
+        ${textLinks}
+      </td>
+      <td></td>
+    </tr>`;
+  }).join('');
+  syncSelectAllCheckbox();
+}
+
+/* ---------------- 頁籤切換（有貨號／無貨號客戶） ---------------- */
+document.getElementById('tabRow').addEventListener('click', e => {
+  const btn = e.target.closest('.tab-btn');
+  if (!btn) return;
+  const tab = btn.getAttribute('data-tab');
+  if (tab === state.activeTab) return;
+  state.activeTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+  document.getElementById('masterItemsPanel').style.display = tab === 'noCode' ? 'flex' : 'none';
+  // 統計卡篩選跟表頭欄位篩選都是「頁籤內」的概念，切頁籤時重置，避免帶著上個頁籤的篩選條件卻找不到東西
+  state.statFilter = 'all';
+  state.cycleFilter = 'all';
+  state.selectedCodes.clear(); // 勾選也是頁籤內的概念，切頁籤時一併清空
+  document.querySelectorAll('#statCards .stat-card').forEach(c => c.classList.toggle('active', c.getAttribute('data-filter') === 'all'));
+  renderTableHead();
+  renderTable();
+  renderStats();
+  updateBulkButtonsState();
+  if (tab === 'noCode' && !state.masterItems.length) loadMasterItems();
+});
+
+
+// 用單一客戶物件更新本地狀態並重繪，避免每次操作都要整份清單往返
+function upsertCustomer(customer) {
+  if (!customer) return;
+  const idx = state.customers.findIndex(c => c.code === customer.code);
+  if (idx === -1) state.customers.push(customer);
+  else state.customers[idx] = customer;
+  renderTable();
+  renderStats();
+}
+
+document.getElementById('custTbody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const code = btn.getAttribute('data-code');
+  const customer = state.customers.find(c => c.code === code);
+  if (!customer) return;
+  const act = btn.getAttribute('data-act');
+  try {
+    if (act === 'upload' || act === 'export') openWizard(customer);
+    else if (act === 'history') openHistoryModal(customer);
+    else if (act === 'edit') openCustomerModal(customer);
+    else if (act === 'reconfigure') reconfigureMapping(customer);
+    else if (act === 'delete') deleteCustomerSingle(customer);
+    else if (act === 'lookup') openLookupWizard(customer);
+  } catch (err) {
+    toast('err', '操作失敗，頁面可能不是最新版本，請重新整理或確認部署檔案是否為最新：' + err.message);
+  }
+});
+
+document.getElementById('custTbody').addEventListener('change', e => {
+  const cb = e.target.closest('input.rowCheckbox');
+  if (!cb) return;
+  const code = cb.getAttribute('data-code');
+  if (cb.checked) state.selectedCodes.add(code);
+  else state.selectedCodes.delete(code);
+  updateBulkButtonsState();
+  syncSelectAllCheckbox();
+});
+
+async function unexportCustomer(customer) {
+  if (!confirm(`確定要清除 ${customer.code} 的匯出紀錄嗎？清除後將視為「尚未匯出過」，到期日重新計算。`)) return;
+  setLoading(true, '更新狀態…');
+  try {
+    assertSb();
+    const { data, error } = await sb.from('customers').update({
+      export_status: '未匯出', last_export_time: null, last_export_filename: '', updated_at: new Date().toISOString()
+    }).eq('code', customer.code).select().single();
+    if (error) throw new Error(error.message);
+    upsertCustomer(rowToCustomer(data));
+    toast('ok', `已清除 ${customer.code} 的匯出紀錄`);
+  } catch (err) { toast('err', err.message); }
+  finally { setLoading(false); }
+}
+
+async function reconfigureMapping(customer) {
+  if (!confirm(`確定要清除 ${customer.code} 已設定的欄位對應範本嗎？下次上傳時需要重新設定。`)) return;
+  setLoading(true, '清除設定中…');
+  try {
+    assertSb();
+    const { data, error } = await sb.from('customers').update({
+      mapping: null, updated_at: new Date().toISOString()
+    }).eq('code', customer.code).select().single();
+    if (error) throw new Error(error.message);
+    upsertCustomer(rowToCustomer(data));
+    toast('ok', `已清除 ${customer.code} 的欄位對應設定`);
+  } catch (err) { toast('err', err.message); }
+  finally { setLoading(false); }
+}
+
+async function deleteCustomerSingle(customer) {
+  if (!confirm(`確定要刪除客戶 ${customer.code} ${customer.name || ''} 嗎？此操作無法復原，客戶的欄位對應、匯出紀錄都會一併刪除。`)) return;
+  setLoading(true, '刪除中…');
+  try {
+    assertSb();
+    const { error } = await sb.from('customers').delete().eq('code', customer.code);
+    if (error) throw new Error(error.message);
+    state.customers = state.customers.filter(c => c.code !== customer.code);
+    state.selectedCodes.delete(customer.code);
+    renderTable(); renderStats(); updateBulkButtonsState();
+    toast('ok', `已刪除 ${customer.code}`);
+  } catch (err) { toast('err', err.message); }
+  finally { setLoading(false); }
+}
+
+/* ---------------- 批次選取 ---------------- */
+function updateBulkButtonsState() {
+  const n = state.selectedCodes.size;
+  const editBtn = document.getElementById('btnBatchEdit');
+  const delBtn = document.getElementById('btnBatchDelete');
+  editBtn.disabled = n === 0;
+  delBtn.disabled = n === 0;
+  editBtn.textContent = n ? `批次修改 (${n})` : '批次修改';
+  delBtn.textContent = n ? `批次刪除 (${n})` : '批次刪除';
+}
+function syncSelectAllCheckbox() {
+  const selectAll = document.getElementById('selectAllCheckbox');
+  if (!selectAll) return;
+  const visible = filteredCustomers();
+  const visibleCodes = visible.map(c => c.code);
+  const allSelected = visibleCodes.length > 0 && visibleCodes.every(code => state.selectedCodes.has(code));
+  selectAll.checked = allSelected;
+  selectAll.indeterminate = !allSelected && visibleCodes.some(code => state.selectedCodes.has(code));
+}
+document.getElementById('tableHead').addEventListener('change', e => {
+  const cb = e.target.closest('#selectAllCheckbox');
+  if (!cb) return;
+  const visible = filteredCustomers();
+  if (cb.checked) visible.forEach(c => state.selectedCodes.add(c.code));
+  else visible.forEach(c => state.selectedCodes.delete(c.code));
+  renderTable();
+  updateBulkButtonsState();
+});
+
+document.getElementById('btnBatchDelete').addEventListener('click', async () => {
+  const codes = Array.from(state.selectedCodes);
+  if (!codes.length) return;
+  if (!confirm(`確定要刪除選取的 ${codes.length} 筆客戶嗎？此操作無法復原，客戶的欄位對應、匯出紀錄都會一併刪除。`)) return;
+  setLoading(true, `批次刪除中… (0/${codes.length})`);
+  try {
+    assertSb();
+    const { error } = await sb.from('customers').delete().in('code', codes);
+    if (error) throw new Error(error.message);
+    state.customers = state.customers.filter(c => !state.selectedCodes.has(c.code));
+    state.selectedCodes.clear();
+    renderTable(); renderStats(); updateBulkButtonsState();
+    toast('ok', `已刪除 ${codes.length} 筆客戶`);
+  } catch (err) { toast('err', err.message); }
+  finally { setLoading(false); }
+});
+
+/* ---------------- 批次修改 ---------------- */
+function wireBatchEditCheckbox(checkboxId, selectId) {
+  const cb = document.getElementById(checkboxId);
+  const sel = document.getElementById(selectId);
+  cb.addEventListener('change', () => { sel.disabled = !cb.checked; });
+}
+wireBatchEditCheckbox('beApplyMode', 'beMode');
+wireBatchEditCheckbox('beApplyCycle', 'beCycle');
+wireBatchEditCheckbox('beApplyStatus', 'beStatus');
+
+document.getElementById('btnBatchEdit').addEventListener('click', () => {
+  if (!state.selectedCodes.size) return;
+  document.getElementById('batchEditSub').textContent = `已選擇 ${state.selectedCodes.size} 筆客戶`;
+  ['beApplyMode', 'beApplyCycle', 'beApplyStatus'].forEach(id => { document.getElementById(id).checked = false; });
+  ['beMode', 'beCycle', 'beStatus'].forEach(id => { document.getElementById(id).disabled = true; });
+  openModal('ovBatchEdit');
+});
+
+document.getElementById('btnConfirmBatchEdit').addEventListener('click', async () => {
+  const codes = Array.from(state.selectedCodes);
+  if (!codes.length) return;
+  const applyMode = document.getElementById('beApplyMode').checked;
+  const applyCycle = document.getElementById('beApplyCycle').checked;
+  const applyStatus = document.getElementById('beApplyStatus').checked;
+  if (!applyMode && !applyCycle && !applyStatus) { toast('err', '請至少勾選一個要修改的欄位'); return; }
+  const patch = { updated_at: new Date().toISOString() };
+  if (applyMode) patch.product_code_mode = document.getElementById('beMode').value;
+  if (applyCycle) patch.quote_cycle = document.getElementById('beCycle').value;
+  if (applyStatus) {
+    const status = document.getElementById('beStatus').value;
+    patch.export_status = status;
+    // 批次修改沒有個別客戶原本的實際匯出時間可用，「已匯出」就用現在時間起算到期日，
+    // 跟批次匯入客戶是同樣的取捨
+    patch.last_export_time = status === '已匯出' ? new Date().toISOString() : null;
+    if (status !== '已匯出') patch.last_export_filename = '';
+  }
+  setLoading(true, `批次修改中…（${codes.length} 筆）`);
+  try {
+    assertSb();
+    const { data, error } = await sb.from('customers').update(patch).in('code', codes)
+      .select('code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count');
+    if (error) throw new Error(error.message);
+    (data || []).forEach(row => upsertCustomer(rowToCustomer(row)));
+    closeModal('ovBatchEdit');
+    toast('ok', `已修改 ${codes.length} 筆客戶`);
+  } catch (err) { toast('err', err.message); }
+  finally { setLoading(false); }
+});
+
+/* ---------------- 查看紀錄 Modal ---------------- */
+function openHistoryModal(customer) {
+  const info = computeDueInfo(customer);
+  const rows = [
+    ['客戶代號', customer.code],
+    ['客戶名稱', customer.name || '—'],
+    ['報價種類', customer.productCodeMode],
+    ['報價週期', customer.quoteCycle],
+    ['匯出格式', customer.mapping ? '已設定' : '尚未設定'],
+    ['匯出狀態', info.state === 'active' ? '已匯出' : '尚未匯出'],
+    ['最後匯出時間', customer.lastExportTime || '—'],
+    ['最後匯出檔名', customer.lastExportFileName || '—'],
+    ['最後匯出品項數', customer.lastExportItemCount || 0],
+    ['到期日', info.due ? formatDateShort(info.due) : '—']
+  ];
+  if (customer.productCodeMode === '無貨號') {
+    rows.splice(4, 0, ['料號對照表', customer.itemCodeLookupCount ? `已設定（${customer.itemCodeLookupCount} 筆）` : '尚未設定']);
+  }
+  document.getElementById('historyTitle').textContent = `匯出紀錄－${customer.code} ${customer.name || ''}`;
+  document.getElementById('historyTable').innerHTML = rows.map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join('');
+  openModal('ovHistory');
+}
+
+/* ---------------- 忠欣品項主檔：上傳/更新 ---------------- */
+let masterItemsParsed = [];
+document.getElementById('btnMasterItems').addEventListener('click', () => {
+  ensureXLSX();
+  masterItemsParsed = [];
+  document.getElementById('masterItemsPreviewWrap').style.display = 'none';
+  document.getElementById('masterItemsFileInput').value = '';
+  document.getElementById('btnConfirmMasterItems').disabled = true;
+  openModal('ovMasterItems');
+});
+setupDropzone('masterItemsDropzone', 'masterItemsFileInput', async file => {
+  try {
+    const { rows } = await readWorkbookRaw(file);
+    if (!rows.length) { toast('err', '檔案沒有資料'); return; }
+    const headerRow = rows[0].map(h => String(h || '').trim());
+    const codeIdx = headerRow.findIndex(h => /料號|品號|產品編號/.test(h));
+    const nameIdx = headerRow.findIndex(h => /品名|名稱|品項/.test(h));
+    const unitIdx = headerRow.findIndex(h => /單位/.test(h));
+    if (codeIdx === -1 || nameIdx === -1) { toast('err', '找不到「料號」或「品項名稱」欄位，請確認第一列是標題列'); return; }
+    masterItemsParsed = [];
+    for (let i = 1; i < rows.length; i++) {
+      const itemCode = String(rows[i][codeIdx] || '').trim();
+      if (!itemCode) continue;
+      masterItemsParsed.push({
+        itemCode,
+        itemName: String(rows[i][nameIdx] || '').trim(),
+        unit: unitIdx > -1 ? String(rows[i][unitIdx] || '').trim() : ''
+      });
+    }
+    document.getElementById('masterItemsSummary').textContent = `辨識到 ${masterItemsParsed.length} 筆品項，確認後會整份取代目前的忠欣品項主檔`;
+    const table = document.getElementById('masterItemsPreviewTable');
+    table.innerHTML = '<thead><tr><th>料號</th><th>品項名稱</th><th>單位</th></tr></thead><tbody>' +
+      masterItemsParsed.slice(0, 200).map(m => `<tr><td class="mono">${escapeHtml(m.itemCode)}</td><td>${escapeHtml(m.itemName)}</td><td>${escapeHtml(m.unit)}</td></tr>`).join('') +
+      '</tbody>';
+    document.getElementById('masterItemsPreviewWrap').style.display = 'block';
+    document.getElementById('btnConfirmMasterItems').disabled = masterItemsParsed.length === 0;
+  } catch (err) { toast('err', '解析失敗：' + err.message); }
+});
+document.getElementById('btnConfirmMasterItems').addEventListener('click', async () => {
+  if (!masterItemsParsed.length) return;
+  setLoading(true, '寫入忠欣品項主檔中…');
+  try {
+    await saveMasterItems(masterItemsParsed);
+    closeModal('ovMasterItems');
+    toast('ok', `已更新忠欣品項主檔，共 ${masterItemsParsed.length} 筆`);
+  } catch (err) { toast('err', err.message); }
+  finally { setLoading(false); }
+});
+
+/* ---------------- 客戶料號對照表：上傳（每個無貨號客戶各自一份） ---------------- */
+let lookupParsed = [];
+let lookupTargetCustomer = null;
+function openLookupWizard(customer) {
+  lookupTargetCustomer = customer;
+  lookupParsed = [];
+  document.getElementById('lookupTitle').textContent = `上傳料號對照表 － ${customer.code} ${customer.name || ''}`;
+  document.getElementById('lookupPreviewWrap').style.display = 'none';
+  document.getElementById('lookupFileInput').value = '';
+  document.getElementById('btnConfirmLookup').disabled = true;
+  ensureXLSX();
+  openModal('ovLookup');
+}
+setupDropzone('lookupDropzone', 'lookupFileInput', async file => {
+  try {
+    const { rows } = await readWorkbookRaw(file);
+    if (!rows.length) { toast('err', '檔案沒有資料'); return; }
+    const headerRow = rows[0].map(h => String(h || '').trim());
+    const nameIdx = headerRow.findIndex(h => /品名|名稱/.test(h));
+    const codeIdx = headerRow.findIndex(h => /料號|貨號|品號/.test(h));
+    if (nameIdx === -1 || codeIdx === -1) { toast('err', '找不到「客戶品名」或「料號」欄位，請確認第一列是標題列'); return; }
+    lookupParsed = [];
+    for (let i = 1; i < rows.length; i++) {
+      const name = String(rows[i][nameIdx] || '').trim();
+      const code = String(rows[i][codeIdx] || '').trim();
+      if (!name || !code) continue;
+      lookupParsed.push({ name, code });
+    }
+    document.getElementById('lookupSummary').textContent = `辨識到 ${lookupParsed.length} 筆對應，確認後會整份取代這個客戶目前的料號對照表`;
+    const table = document.getElementById('lookupPreviewTable');
+    table.innerHTML = '<thead><tr><th>客戶品名</th><th>忠欣料號</th></tr></thead><tbody>' +
+      lookupParsed.slice(0, 200).map(x => `<tr><td>${escapeHtml(x.name)}</td><td class="mono">${escapeHtml(x.code)}</td></tr>`).join('') +
+      '</tbody>';
+    document.getElementById('lookupPreviewWrap').style.display = 'block';
+    document.getElementById('btnConfirmLookup').disabled = lookupParsed.length === 0;
+  } catch (err) { toast('err', '解析失敗：' + err.message); }
+});
+document.getElementById('btnConfirmLookup').addEventListener('click', async () => {
+  if (!lookupParsed.length || !lookupTargetCustomer) return;
+  setLoading(true, '寫入料號對照表中…');
+  try {
+    const customer = await saveItemCodeLookup(lookupTargetCustomer.code, lookupParsed);
+    upsertCustomer(customer);
+    closeModal('ovLookup');
+    toast('ok', `已更新 ${customer.code} 的料號對照表，共 ${lookupParsed.length} 筆`);
+  } catch (err) { toast('err', err.message); }
+  finally { setLoading(false); }
+});
+
+/* ---------------- 篩選列（搜尋 / 統計卡 / 欄位篩選 icon） ---------------- */
+document.getElementById('searchInput').addEventListener('input', e => {
+  state.search = e.target.value; renderTable(); syncSelectAllCheckbox();
+});
+document.getElementById('statCards').addEventListener('click', e => {
+  const card = e.target.closest('.stat-card');
+  if (!card) return;
+  state.statFilter = card.getAttribute('data-filter');
+  document.querySelectorAll('#statCards .stat-card').forEach(c => c.classList.toggle('active', c === card));
+  renderTable();
+  syncSelectAllCheckbox();
+});
+
+/* 表頭欄位篩選（報價週期旁的篩選 icon；報價種類現在由頁籤區分，不需要再篩選） */
+const COLUMN_FILTER_OPTIONS = {
+  quoteCycle: { stateKey: 'cycleFilter', options: [['all', '全部週期'], ['7天', '7天'], ['10天', '10天'], ['15天', '15天'], ['30天', '30天']] }
+};
+const colFilterMenuEl = document.getElementById('colFilterMenu');
+let colFilterCurrentCol = null;
+
+function updateFilterIconStates() {
+  document.querySelectorAll('.th-filter-btn[data-filter-col]').forEach(btn => {
+    const col = btn.getAttribute('data-filter-col');
+    const cfg = COLUMN_FILTER_OPTIONS[col];
+    if (!cfg) return;
+    btn.classList.toggle('active', state[cfg.stateKey] !== 'all');
+  });
+}
+
+function openColFilterMenu(btn, col) {
+  const cfg = COLUMN_FILTER_OPTIONS[col];
+  if (!cfg) return;
+  colFilterCurrentCol = col;
+  const current = state[cfg.stateKey];
+  colFilterMenuEl.innerHTML = cfg.options.map(([value, label]) => `
+    <label>
+      <input type="radio" name="colFilterRadio" value="${value}" ${current === value ? 'checked' : ''}>
+      ${escapeHtml(label)}
+    </label>
+  `).join('');
+  colFilterMenuEl.style.display = 'flex';
+  const rect = btn.getBoundingClientRect();
+  const menuRect = colFilterMenuEl.getBoundingClientRect();
+  let top = rect.bottom + 6;
+  if (top + menuRect.height > window.innerHeight) top = rect.top - menuRect.height - 6;
+  let left = rect.left;
+  if (left + menuRect.width > window.innerWidth - 8) left = window.innerWidth - menuRect.width - 8;
+  colFilterMenuEl.style.top = top + 'px';
+  colFilterMenuEl.style.left = left + 'px';
+}
+function closeColFilterMenu() { colFilterMenuEl.style.display = 'none'; colFilterCurrentCol = null; }
+
+// 用事件委派綁在穩定的 tableHead 容器上，而不是綁在個別按鈕：
+// 表頭在切頁籤時會被 renderTableHead() 整個重繪，綁在按鈕本身的監聽器會跟著舊元素一起消失。
+document.getElementById('tableHead').addEventListener('click', e => {
+  const btn = e.target.closest('.th-filter-btn[data-filter-col]');
+  if (!btn) return;
+  e.stopPropagation();
+  const col = btn.getAttribute('data-filter-col');
+  if (colFilterCurrentCol === col && colFilterMenuEl.style.display === 'flex') { closeColFilterMenu(); return; }
+  openColFilterMenu(btn, col);
+});
+colFilterMenuEl.addEventListener('change', e => {
+  const radio = e.target.closest('input[name="colFilterRadio"]');
+  if (!radio || !colFilterCurrentCol) return;
+  const cfg = COLUMN_FILTER_OPTIONS[colFilterCurrentCol];
+  state[cfg.stateKey] = radio.value;
+  updateFilterIconStates();
+  renderTable();
+  syncSelectAllCheckbox();
+  closeColFilterMenu();
+});
+document.addEventListener('click', e => {
+  if (e.target.closest('#colFilterMenu') || e.target.closest('[data-filter-col]')) return;
+  closeColFilterMenu();
+});
+
+document.getElementById('btnResetAll').addEventListener('click', async () => {
+  if (!confirm('確定要清除「全部」客戶的匯出紀錄嗎？清除後全部客戶會變成「尚未匯出過」，到期日重新計算。')) return;
+  setLoading(true, '重置中…');
+  try {
+    assertSb();
+    const { data, error } = await sb.from('customers').update({
+      export_status: '未匯出', last_export_time: null, last_export_filename: '', updated_at: new Date().toISOString()
+    }).not('code', 'is', null).select();
+    if (error) throw new Error(error.message);
+    state.customers = (data || []).map(rowToCustomer);
+    renderTable(); renderStats();
+    toast('ok', '已清除全部客戶的匯出紀錄');
+  } catch (err) { toast('err', err.message); }
+  finally { setLoading(false); }
+});
+
+/* ---------------- 新增/編輯客戶 Modal ---------------- */
+let editingCode = null;
+function openCustomerModal(customer) {
+  editingCode = customer ? customer.code : null;
+  const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; else console.warn('找不到欄位 #' + id + '，頁面可能不是最新版本'); };
+  document.getElementById('custModalTitle').textContent = customer ? '編輯客戶' : '新增客戶';
+  setVal('custCode', customer ? customer.code : '');
+  document.getElementById('custCode').disabled = !!customer;
+  setVal('custName', customer ? customer.name : '');
+  setVal('custProductCodeMode', customer ? customer.productCodeMode : '有貨號');
+  setVal('custQuoteCycle', customer ? customer.quoteCycle : '7天');
+  setVal('custExportStatus', customer ? (customer.exportStatus === '已匯出' ? '已匯出' : '未匯出') : '未匯出');
+  openModal('ovCustomer');
+}
+document.getElementById('btnAddCustomer').addEventListener('click', () => openCustomerModal(null));
+
+// 新增/編輯客戶寫入邏輯：只有「匯出狀態」真的有變動時才動到 last_export_time，
+// 避免只是改個名字之類的無關編輯，卻不小心把到期日重新起算。
+async function saveCustomerToBackend(payload) {
+  assertSb();
+  const { data: existing, error: selErr } = await sb.from('customers').select('export_status').eq('code', payload.code).maybeSingle();
+  if (selErr) throw new Error(selErr.message);
+  const desired = payload.exportStatus === '已匯出' ? '已匯出' : '未匯出';
+  const nowIso = new Date().toISOString();
+
+  const upsertRow = {
+    code: payload.code,
+    name: payload.name || '',
+    product_code_mode: payload.productCodeMode === '無貨號' ? '無貨號' : '有貨號',
+    quote_cycle: ['7天', '10天', '15天', '30天'].includes(payload.quoteCycle) ? payload.quoteCycle : '7天',
+    updated_at: nowIso
+  };
+  if (!existing) {
+    upsertRow.export_status = desired;
+    upsertRow.last_export_time = desired === '已匯出' ? nowIso : null;
+  } else if (desired !== (existing.export_status || '未匯出')) {
+    upsertRow.export_status = desired;
+    if (desired === '已匯出') {
+      upsertRow.last_export_time = nowIso;
+    } else {
+      upsertRow.last_export_time = null;
+      upsertRow.last_export_filename = '';
+    }
+  }
+  const { data, error } = await sb.from('customers').upsert(upsertRow, { onConflict: 'code' }).select().single();
+  if (error) throw new Error(error.message);
+  return rowToCustomer(data);
+}
+
+document.getElementById('btnSaveCustomer').addEventListener('click', async () => {
+  const code = document.getElementById('custCode').value.trim();
+  const name = document.getElementById('custName').value.trim();
+  if (!code) { toast('err', '請輸入客戶代號'); return; }
+  setLoading(true, '儲存中…');
+  try {
+    const customer = await saveCustomerToBackend({
+      code, name,
+      productCodeMode: document.getElementById('custProductCodeMode').value,
+      quoteCycle: document.getElementById('custQuoteCycle').value,
+      exportStatus: document.getElementById('custExportStatus').value
+    });
+    upsertCustomer(customer);
+    closeModal('ovCustomer');
+    toast('ok', '客戶資料已儲存');
+  } catch (err) { toast('err', err.message); }
+  finally { setLoading(false); }
+});
+
+/* ---------------- 批次匯入客戶 Modal ---------------- */
+let batchParsed = [];
+function setupDropzone(zoneId, inputId, onFile) {
+  const zone = document.getElementById(zoneId);
+  const input = document.getElementById(inputId);
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => { if (input.files[0]) onFile(input.files[0]); });
+  ['dragenter', 'dragover'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.add('drag'); }));
+  ['dragleave', 'drop'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.remove('drag'); }));
+  zone.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) onFile(f); });
+}
+function setupMultiDropzone(zoneId, inputId, onFiles) {
+  const zone = document.getElementById(zoneId);
+  const input = document.getElementById(inputId);
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => { if (input.files.length) onFiles(Array.from(input.files)); });
+  ['dragenter', 'dragover'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.add('drag'); }));
+  ['dragleave', 'drop'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.remove('drag'); }));
+  zone.addEventListener('drop', e => { const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []); if (files.length) onFiles(files); });
+}
+// 純拖曳版本（不綁點擊開檔案，因為批次匯入報價單改用兩個明確按鈕分別觸發「選檔案」跟「選資料夾」）
+function setupDropOnly(zoneId, onFiles) {
+  const zone = document.getElementById(zoneId);
+  ['dragenter', 'dragover'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.add('drag'); }));
+  ['dragleave', 'drop'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.remove('drag'); }));
+  zone.addEventListener('drop', e => { const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []); if (files.length) onFiles(files); });
+}
+
+setupDropzone('batchDropzone', 'batchFileInput', async file => {
+  try {
+    const { rows } = await readWorkbookRaw(file);
+    if (!rows.length) { toast('err', '檔案沒有資料'); return; }
+    const headerRow = rows[0].map(h => String(h || '').trim());
+    const codeIdx = headerRow.findIndex(h => h.includes('客戶代號') || h.includes('代號'));
+    const nameIdx = headerRow.findIndex(h => h.includes('客戶名稱') || h.includes('名稱'));
+    const modeIdx = headerRow.findIndex(h => h.includes('報價種類') || h.includes('種類'));
+    const cycleIdx = headerRow.findIndex(h => h.includes('報價週期') || h.includes('週期'));
+    const statusIdx = headerRow.findIndex(h => h.includes('匯出狀態'));
+    if (codeIdx === -1) { toast('err', '找不到「客戶代號」欄位，請確認第一列為標題列'); return; }
+    batchParsed = [];
+    for (let i = 1; i < rows.length; i++) {
+      const code = String(rows[i][codeIdx] || '').trim();
+      if (!code) continue;
+      const name = nameIdx > -1 ? String(rows[i][nameIdx] || '').trim() : '';
+      const modeRaw = modeIdx > -1 ? String(rows[i][modeIdx] || '').trim() : '';
+      const cycleRaw = cycleIdx > -1 ? String(rows[i][cycleIdx] || '').trim() : '';
+      const statusRaw = statusIdx > -1 ? String(rows[i][statusIdx] || '').trim() : '';
+      const productCodeMode = modeRaw === '無貨號' ? '無貨號' : '有貨號';
+      const quoteCycle = ['7天', '10天', '15天', '30天'].includes(cycleRaw) ? cycleRaw : '7天';
+      const exportStatus = statusRaw === '已匯出' ? '已匯出' : '未匯出'; // 「尚未匯出」「未匯出」或空白都視為未匯出
+      batchParsed.push({ code, name, productCodeMode, quoteCycle, exportStatus });
+    }
+    document.getElementById('batchSummary').textContent = `辨識到 ${batchParsed.length} 筆客戶資料，確認後將新增或更新客戶主檔` +
+      (modeIdx === -1 || cycleIdx === -1 || statusIdx === -1 ? '（檔案缺少部分欄位，缺的部分會用預設值：有貨號／7天／尚未匯出）' : '');
+    const table = document.getElementById('batchPreviewTable');
+    table.innerHTML = '<thead><tr><th>客戶代號</th><th>客戶名稱</th><th>報價種類</th><th>報價週期</th><th>匯出狀態</th></tr></thead><tbody>' +
+      batchParsed.slice(0, 200).map(c => `<tr><td class="mono">${escapeHtml(c.code)}</td><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.productCodeMode)}</td><td>${escapeHtml(c.quoteCycle)}</td><td>${escapeHtml(c.exportStatus === '已匯出' ? '已匯出' : '尚未匯出')}</td></tr>`).join('') +
+      '</tbody>';
+    document.getElementById('batchPreviewWrap').style.display = 'block';
+    document.getElementById('btnConfirmBatch').disabled = batchParsed.length === 0;
+  } catch (err) { toast('err', '解析失敗：' + err.message); }
+});
+
+document.getElementById('btnBatchImport').addEventListener('click', () => {
+  ensureXLSX();
+  batchParsed = [];
+  document.getElementById('batchPreviewWrap').style.display = 'none';
+  document.getElementById('batchFileInput').value = '';
+  document.getElementById('btnConfirmBatch').disabled = true;
+  openModal('ovBatch');
+});
+
+document.getElementById('btnConfirmBatch').addEventListener('click', async () => {
+  if (!batchParsed.length) return;
+  setLoading(true, '匯入客戶中…');
+  try {
+    assertSb();
+    const nowIso = new Date().toISOString();
+    // Postgres 的 upsert 沒有 GAS 網址長度那種限制，可以一次送一大批；
+    // 這裡仍保留適度分批（300 筆一批）純粹是避免單次請求過大，不是為了繞過什麼限制。
+    const CHUNK = 300;
+    const allRows = [];
+    for (let i = 0; i < batchParsed.length; i += CHUNK) {
+      const chunk = batchParsed.slice(i, i + CHUNK);
+      setLoading(true, `匯入客戶中… (${Math.min(i + CHUNK, batchParsed.length)}/${batchParsed.length})`);
+      const payload = chunk.map(c => ({
+        code: c.code,
+        name: c.name,
+        product_code_mode: c.productCodeMode,
+        quote_cycle: c.quoteCycle,
+        export_status: c.exportStatus,
+        // 檔案沒有實際匯出時間可用，「已匯出」就用現在時間起算到期日；重複匯入同一批已匯出的客戶
+        // 會讓到期日重新起算，這是這個批次匯入工具的已知取捨（主要設計給初次建立客戶清單用）
+        last_export_time: c.exportStatus === '已匯出' ? nowIso : null,
+        updated_at: nowIso
+      }));
+      const { data, error } = await sb.from('customers').upsert(payload, { onConflict: 'code' }).select('code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count');
+      if (error) throw new Error(error.message);
+      allRows.push(...(data || []));
+    }
+    allRows.forEach(row => upsertCustomer(rowToCustomer(row)));
+    closeModal('ovBatch');
+    toast('ok', `已匯入 ${batchParsed.length} 筆客戶資料`);
+  } catch (err) { toast('err', err.message); }
+  finally { setLoading(false); }
+});
+
+/* ---------------- 批次匯入報價單（依檔名比對客戶） ---------------- */
+let batchQuotesFiles = [];
+function matchCustomersByFilename(filename) {
+  const configured = state.customers.filter(c => c.mapping);
+  const lower = filename.toLowerCase();
+  return configured.filter(c => {
+    const codeHit = c.code && lower.includes(String(c.code).toLowerCase());
+    const nameHit = c.name && c.name.trim() && lower.includes(c.name.trim().toLowerCase());
+    return codeHit || nameHit;
+  });
+}
+
+document.getElementById('btnBatchQuotes').addEventListener('click', () => {
+  ensureXLSX();
+  batchQuotesFiles = [];
+  document.getElementById('batchQuotesPreviewWrap').style.display = 'none';
+  document.getElementById('batchQuotesProgressWrap').style.display = 'none';
+  document.getElementById('batchQuotesFileInput').value = '';
+  document.getElementById('batchQuotesFolderInput').value = '';
+  document.getElementById('btnConfirmBatchQuotes').disabled = true;
+  openModal('ovBatchQuotes');
+});
+
+// 累加式加入檔案：同檔名再選一次會「更新」那一筆（重新比對），不是整批清掉重來；
+// 這樣才能分好幾次選檔案、或選檔案後再選資料夾補充，彼此不會互相蓋掉。
+function addBatchQuotesFiles(newFiles) {
+  const validExt = /\.(xlsx|xls|csv)$/i;
+  const filtered = newFiles.filter(f => validExt.test(f.name));
+  if (!filtered.length) { toast('err', '選取的項目裡沒有 .xlsx/.xls/.csv 格式的檔案'); return; }
+  filtered.forEach(file => {
+    const matches = matchCustomersByFilename(file.name);
+    let status, customer = null;
+    if (matches.length === 1) { status = 'matched'; customer = matches[0]; }
+    else if (matches.length === 0) { status = 'unmatched'; }
+    else { status = 'ambiguous'; }
+    const entry = { file, matches, status, customer };
+    const existingIdx = batchQuotesFiles.findIndex(f => f.file.name === file.name);
+    if (existingIdx > -1) batchQuotesFiles[existingIdx] = entry;
+    else batchQuotesFiles.push(entry);
+  });
+  renderBatchQuotesPreview();
+}
+
+document.getElementById('btnBatchQuotesPickFiles').addEventListener('click', () => document.getElementById('batchQuotesFileInput').click());
+document.getElementById('btnBatchQuotesPickFolder').addEventListener('click', () => document.getElementById('batchQuotesFolderInput').click());
+document.getElementById('batchQuotesFileInput').addEventListener('change', e => {
+  if (e.target.files.length) addBatchQuotesFiles(Array.from(e.target.files));
+  e.target.value = ''; // 清空 value，這樣同一批檔案要再選一次時 change 事件才會再觸發
+});
+document.getElementById('batchQuotesFolderInput').addEventListener('change', e => {
+  if (e.target.files.length) addBatchQuotesFiles(Array.from(e.target.files));
+  e.target.value = '';
+});
+setupDropOnly('batchQuotesDropzone', files => addBatchQuotesFiles(files));
+document.getElementById('btnBatchQuotesClear').addEventListener('click', () => {
+  batchQuotesFiles = [];
+  document.getElementById('batchQuotesPreviewWrap').style.display = 'none';
+  document.getElementById('btnConfirmBatchQuotes').disabled = true;
+});
+
+function renderBatchQuotesPreview() {
+  const okCount = batchQuotesFiles.filter(f => f.status === 'matched').length;
+  document.getElementById('batchQuotesSummary').textContent = `共 ${batchQuotesFiles.length} 個檔案，可辨識並匯出 ${okCount} 筆`;
+  const table = document.getElementById('batchQuotesPreviewTable');
+  table.innerHTML = '<thead><tr><th>檔案名稱</th><th>比對到的客戶</th><th>狀態</th></tr></thead><tbody>' +
+    batchQuotesFiles.map(f => {
+      let matchText, statusText;
+      if (f.status === 'matched') { matchText = `${f.customer.code} ${f.customer.name || ''}`; statusText = '<span class="badge badge-green">可匯出</span>'; }
+      else if (f.status === 'unmatched') { matchText = '—'; statusText = '<span class="badge badge-red">找不到相符客戶</span>'; }
+      else { matchText = f.matches.map(m => m.code).join('、'); statusText = '<span class="badge badge-red">比對到多個客戶</span>'; }
+      return `<tr><td>${escapeHtml(f.file.name)}</td><td>${escapeHtml(matchText)}</td><td>${statusText}</td></tr>`;
+    }).join('') + '</tbody>';
+  document.getElementById('batchQuotesPreviewWrap').style.display = 'block';
+  document.getElementById('btnConfirmBatchQuotes').disabled = okCount === 0;
+}
+
+document.getElementById('btnConfirmBatchQuotes').addEventListener('click', async () => {
+  const jobs = batchQuotesFiles.filter(f => f.status === 'matched');
+  if (!jobs.length) return;
+  document.getElementById('batchQuotesProgressWrap').style.display = 'block';
+  document.getElementById('btnConfirmBatchQuotes').disabled = true;
+  let okN = 0, failN = 0;
+  let totalHidden = 0;
+  const failLog = [];
+  try {
+    await ensureExcelJS();
+    for (let i = 0; i < jobs.length; i++) {
+      const job = jobs[i];
+      document.getElementById('batchQuotesProgress').textContent = `處理中 ${i + 1}/${jobs.length}：${job.customer.code} ${job.customer.name || ''}`;
+      try {
+        const { rows, hiddenCount } = await readWorkbookRaw(job.file);
+        totalHidden += hiddenCount || 0;
+        const noCode = job.customer.productCodeMode === '無貨號';
+        const previousCodes = await fetchPreviousCodes(job.customer.code);
+        const itemCodeLookup = noCode ? await fetchItemCodeLookup(job.customer.code) : [];
+        if (noCode && !itemCodeLookup.length) throw new Error('這個客戶還沒有上傳「料號對照表」');
+        if (noCode && !state.masterItems.length) await loadMasterItems();
+        const records = buildConvertedRecords(rows, job.customer.mapping.dataStartRowIdx, job.customer.mapping.columnMap, job.customer.productCodeMode, previousCodes, itemCodeLookup, state.masterItems);
+        if (!records.length) throw new Error('沒有解析到任何品項，請確認欄位對應是否仍然正確');
+        const outName = await exportWorkbook(job.customer, records);
+        const res = await persistExportResult(job.customer, records, outName);
+        if (!res.ok) throw new Error(res.error || '更新狀態失敗');
+        upsertCustomer(res.customer);
+        okN++;
+      } catch (err) {
+        failN++;
+        failLog.push(`${job.customer.code}：${err.message}`);
+      }
+    }
+  } finally {
+    document.getElementById('batchQuotesProgress').textContent =
+      `完成：成功 ${okN} 筆，失敗 ${failN} 筆${totalHidden ? `（共排除 ${totalHidden} 列隱藏列）` : ''}${failLog.length ? '（' + failLog.join('；') + '）' : ''}`;
+    document.getElementById('btnConfirmBatchQuotes').disabled = false;
+    toast(failN ? 'err' : 'ok', `批次匯出完成：成功 ${okN} 筆${failN ? ('，失敗 ' + failN + ' 筆') : ''}`);
+  }
+});
+
+/* ---------------- 上傳報價單精靈 ---------------- */
+function colLetter(i) {
+  let s = ''; i++;
+  while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); }
+  return s;
+}
+
+function openWizard(customer) {
+  state.wizard = { customer, rawRows: null, dataStartRowIdx: null, columnMap: {}, numCols: 0, convertedRecords: [], step: 1, usingSaved: false, fileName: '', previousCodes: [], itemCodeLookup: [], isFirstEverExport: true };
+  document.getElementById('wizardTitle').textContent = `${customer.mapping ? '匯出報價單' : '上傳報價單'} － ${customer.code} ${customer.name || ''}`;
+  document.getElementById('wizardSub').textContent = customer.mapping
+    ? '此客戶已設定欄位對應範本，上傳後將自動套用並匯出'
+    : '首次上傳此客戶的報價單，需要設定欄位對應（之後可自動套用）';
+  document.getElementById('wizFileInput').value = '';
+  document.getElementById('wizSaveMapping').checked = true;
+  goToWizStep(1);
+  openModal('ovWizard');
+  ensureXLSX();
+  ensureExcelJS();
+  if (customer.productCodeMode === '無貨號' && !state.masterItems.length) loadMasterItems();
+}
+
+function goToWizStep(n) {
+  state.wizard.step = n;
+  document.querySelectorAll('.wiz-panel').forEach(p => { p.style.display = (+p.getAttribute('data-panel') === n) ? 'block' : 'none'; });
+  document.querySelectorAll('.wizard-steps .step').forEach(s => {
+    const sn = +s.getAttribute('data-step');
+    s.classList.toggle('active', sn === n);
+    s.classList.toggle('done', sn < n);
+  });
+  document.getElementById('wizBack').style.display = n > 1 ? 'inline-flex' : 'none';
+  document.getElementById('wizNext').style.display = n < 3 ? 'inline-flex' : 'none';
+  document.getElementById('wizExport').style.display = n === 3 ? 'inline-flex' : 'none';
+}
+
+setupDropzone('wizDropzone', 'wizFileInput', async file => {
+  try {
+    setLoading(true, '解析檔案中…');
+    const noCode = state.wizard.customer.productCodeMode === '無貨號';
+    const [{ rows, hiddenCount }, previousCodes, itemCodeLookup] = await Promise.all([
+      readWorkbookRaw(file),
+      fetchPreviousCodes(state.wizard.customer.code),
+      noCode ? fetchItemCodeLookup(state.wizard.customer.code) : Promise.resolve([])
+    ]);
+    state.wizard.rawRows = rows;
+    state.wizard.fileName = file.name;
+    state.wizard.previousCodes = previousCodes;
+    state.wizard.itemCodeLookup = itemCodeLookup;
+    state.wizard.isFirstEverExport = !previousCodes.length;
+    if (hiddenCount) toast('ok', `已自動排除 ${hiddenCount} 列隱藏列，不會列入辨識`);
+    if (noCode && !itemCodeLookup.length) {
+      setLoading(false);
+      toast('err', '這個客戶還沒有上傳「料號對照表」，請先在客戶列表點「上傳料號對照表」設定好，才能比對出料號');
+      return;
+    }
+    setLoading(false);
+    if (!rows.length) { toast('err', '檔案沒有資料'); return; }
+    const customer = state.wizard.customer;
+    if (customer.mapping && customer.mapping.columnMap && Object.keys(customer.mapping.columnMap).length) {
+      state.wizard.dataStartRowIdx = customer.mapping.dataStartRowIdx;
+      state.wizard.columnMap = Object.assign({}, customer.mapping.columnMap);
+      state.wizard.usingSaved = true;
+      computeConverted();
+      if (!state.wizard.convertedRecords.length) {
+        toast('err', '套用已存範本後沒有解析到任何品項，請重新設定欄位對應');
+        state.wizard.usingSaved = false;
+        state.wizard.columnMap = {};
+        state.wizard.dataStartRowIdx = null;
+        renderMappingStep();
+        goToWizStep(2);
+        return;
+      }
+      renderResultStep();
+      goToWizStep(3);
+    } else {
+      state.wizard.usingSaved = false;
+      renderMappingStep();
+      goToWizStep(2);
+    }
+  } catch (err) { setLoading(false); toast('err', '解析失敗：' + err.message); }
+});
+
+function guessHeaderRowIdx(rows, productCodeMode) {
+  const noCode = productCodeMode === '無貨號';
+  for (let i = 0; i < Math.min(20, rows.length); i++) {
+    const line = (rows[i] || []).join('');
+    if (noCode) {
+      if (/單價/.test(line) && /(品名|規格|名稱)/.test(line)) return i;
+    } else {
+      if (/單價/.test(line) && /(貨號|品號|產品編號|品名)/.test(line)) return i;
+    }
+  }
+  return -1;
+}
+
+function renderMappingStep() {
+  const rows = state.wizard.rawRows;
+  const productCodeMode = state.wizard.customer.productCodeMode;
+  const headerGuessIdx = guessHeaderRowIdx(rows, productCodeMode);
+  if (state.wizard.dataStartRowIdx == null) {
+    state.wizard.dataStartRowIdx = headerGuessIdx >= 0 ? headerGuessIdx + 1 : 0;
+  }
+  const previewRows = rows.slice(0, Math.min(30, rows.length));
+  const maxCols = previewRows.reduce((m, r) => Math.max(m, r.length), 0);
+  state.wizard.numCols = Math.max(maxCols, 1);
+
+  if (!Object.keys(state.wizard.columnMap).length && headerGuessIdx >= 0) {
+    const headerRow = rows[headerGuessIdx] || [];
+    headerRow.forEach((txt, idx) => {
+      const t = String(txt || '');
+      let field = null;
+      if (/貨號|品號|產品編號/.test(t)) field = '貨號';
+      else if (/單價|價格|報價/.test(t)) field = '單價';
+      else if (/單位/.test(t)) field = '單位';
+      else if (/品名|規格|名稱/.test(t)) field = '品名';
+      if (field) state.wizard.columnMap[idx] = field;
+    });
+  }
+  renderMapPreviewTable();
+  renderMapGrid();
+}
+
+function renderMapPreviewTable() {
+  const rows = state.wizard.rawRows;
+  const n = state.wizard.numCols;
+  const previewRows = rows.slice(0, Math.min(30, rows.length));
+  const thead = '<thead><tr><th></th>' + Array.from({ length: n }).map((_, i) => `<th>${colLetter(i)}</th>`).join('') + '</tr></thead>';
+  const body = '<tbody>' + previewRows.map((r, idx) => {
+    const cls = idx >= state.wizard.dataStartRowIdx ? 'marked-start' : '';
+    const cells = Array.from({ length: n }).map((_, ci) => `<td>${escapeHtml(r[ci] != null ? r[ci] : '')}</td>`).join('');
+    return `<tr class="header-row-pick ${cls}" data-row-idx="${idx}"><td class="mono" style="color:var(--ink-soft);">#${idx + 1}</td>${cells}</tr>`;
+  }).join('') + '</tbody>';
+  const table = document.getElementById('wizMapPreviewTable');
+  table.innerHTML = thead + body;
+  table.querySelectorAll('tr[data-row-idx]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      state.wizard.dataStartRowIdx = +tr.getAttribute('data-row-idx');
+      renderMapPreviewTable();
+      renderMapGrid();
+    });
+  });
+}
+
+function renderMapGrid() {
+  const rows = state.wizard.rawRows;
+  const sampleRowIdx = state.wizard.dataStartRowIdx != null ? state.wizard.dataStartRowIdx : 0;
+  const sampleRow = rows[sampleRowIdx] || [];
+  const n = state.wizard.numCols;
+  const targetFields = getTargetFields(state.wizard.customer.productCodeMode);
+  const grid = document.getElementById('wizMapGrid');
+  let html = '';
+  for (let i = 0; i < n; i++) {
+    const sample = sampleRow[i] != null ? String(sampleRow[i]) : '';
+    const current = state.wizard.columnMap[i] || '';
+    html += `<div>
+      <div class="col-label">欄位 ${colLetter(i)}</div>
+      <div class="col-sample" title="${escapeHtml(sample)}">${escapeHtml(sample) || '（空）'}</div>
+      <select data-col-idx="${i}" class="mapSelect">
+        <option value="">（不使用）</option>
+        ${targetFields.map(f => `<option value="${f.key}" ${current === f.key ? 'selected' : ''}>${f.label}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+  grid.innerHTML = html;
+  grid.querySelectorAll('.mapSelect').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const idx = +sel.getAttribute('data-col-idx');
+      if (sel.value) state.wizard.columnMap[idx] = sel.value; else delete state.wizard.columnMap[idx];
+    });
+  });
+}
+
+function computeConverted() {
+  const { rawRows, dataStartRowIdx, columnMap, customer, previousCodes, itemCodeLookup } = state.wizard;
+  state.wizard.convertedRecords = buildConvertedRecords(rawRows, dataStartRowIdx, columnMap, customer.productCodeMode, previousCodes, itemCodeLookup, state.masterItems);
+}
+
+function renderResultStep() {
+  const recs = state.wizard.convertedRecords;
+  const total = recs.length;
+  const newCount = recs.filter(r => r._isNew).length;
+  const unmatchedCount = recs.filter(r => r._unmatched).length;
+  let extraPill;
+  if (state.wizard.isFirstEverExport) {
+    extraPill = `<div class="pill">首次匯出，之後上傳可自動比對新增品項</div>`;
+  } else if (newCount) {
+    extraPill = `<div class="pill warn">新增品項 ${newCount} 項（與上次匯出比較，黃底紅字並排至最後）</div>`;
+  } else {
+    extraPill = `<div class="pill">與上次匯出比較，沒有新增品項</div>`;
+  }
+  const unmatchedPill = unmatchedCount
+    ? `<div class="pill" style="background:#ffe6d1;color:var(--orange-action);">比對不到料號 ${unmatchedCount} 項（橘底，仍會匯出但貨號留空，請補上料號對照表後重新匯出）</div>`
+    : '';
+  document.getElementById('wizResultSummary').innerHTML = `<div class="pill ok">共 ${total} 項</div>${extraPill}${unmatchedPill}`;
+  const table = document.getElementById('wizResultPreviewTable');
+  const customer = state.wizard.customer;
+  const thead = '<thead><tr>' + OUTPUT_HEADERS.map(h => `<th>${h}</th>`).join('') + '</tr></thead>';
+  const body = '<tbody>' + recs.map(rec => {
+    const cells = OUTPUT_FIELD_ORDER.map((f, i) => {
+      let v;
+      if (i === 0) v = customer.code;
+      else if (i === 1) v = customer.name;
+      else v = rec[f] || '';
+      return `<td>${escapeHtml(v)}</td>`;
+    }).join('');
+    const rowCls = rec._unmatched ? 'unmatched-row' : (rec._isNew ? 'new-item-row' : '');
+    return `<tr class="${rowCls}">${cells}</tr>`;
+  }).join('') + '</tbody>';
+  table.innerHTML = thead + body;
+}
+
+document.getElementById('wizNext').addEventListener('click', () => {
+  const step = state.wizard.step;
+  if (step === 1) {
+    if (!state.wizard.rawRows) { toast('err', '請先上傳檔案'); return; }
+    if (state.wizard.usingSaved) { renderResultStep(); goToWizStep(3); return; }
+    renderMappingStep();
+    goToWizStep(2);
+  } else if (step === 2) {
+    const assignedFields = new Set(Object.values(state.wizard.columnMap));
+    const targetFields = getTargetFields(state.wizard.customer.productCodeMode);
+    const missing = targetFields.filter(f => f.required && !assignedFields.has(f.key));
+    if (missing.length) { toast('err', '請先設定：' + missing.map(f => f.label).join('、')); return; }
+    computeConverted();
+    if (!state.wizard.convertedRecords.length) { toast('err', '依目前設定沒有解析到任何品項，請確認起始列與欄位對應'); return; }
+    if (document.getElementById('wizSaveMapping').checked) saveMappingForCustomer();
+    renderResultStep();
+    goToWizStep(3);
+  }
+});
+
+document.getElementById('wizBack').addEventListener('click', () => {
+  const step = state.wizard.step;
+  if (step === 3) {
+    if (state.wizard.usingSaved) {
+      state.wizard.usingSaved = false;
+      renderMappingStep();
+    }
+    goToWizStep(2);
+  } else if (step === 2) {
+    goToWizStep(1);
+  }
+});
+
+async function saveMappingForCustomer() {
+  try {
+    assertSb();
+    const mapping = { dataStartRowIdx: state.wizard.dataStartRowIdx, columnMap: state.wizard.columnMap };
+    const { data, error } = await sb.from('customers').update({
+      mapping, updated_at: new Date().toISOString()
+    }).eq('code', state.wizard.customer.code).select().single();
+    if (!error && data) {
+      const customer = rowToCustomer(data);
+      state.wizard.customer = customer;
+      upsertCustomer(customer);
+    }
+  } catch (err) { /* 靜默失敗，不影響匯出流程 */ }
+}
+
+document.getElementById('wizExport').addEventListener('click', async () => {
+  const { customer, convertedRecords } = state.wizard;
+  if (!convertedRecords.length) return;
+  setLoading(true, '準備匯出元件…');
+  let outName;
+  try {
+    await ensureExcelJS();
+    setLoading(true, '產生匯出檔案…');
+    outName = await exportWorkbook(customer, convertedRecords);
+  } catch (err) {
+    setLoading(false);
+    toast('err', '產生匯出檔案失敗：' + err.message);
+    return;
+  }
+  setLoading(true, '更新匯出狀態…');
+  try {
+    const res = await persistExportResult(customer, convertedRecords, outName);
+    if (!res.ok) throw new Error(res.error || '更新狀態失敗');
+    upsertCustomer(res.customer);
+    closeModal('ovWizard');
+    toast('ok', `已匯出 ${customer.code}，共 ${convertedRecords.length} 項，並標示為已匯出`);
+  } catch (err) {
+    // 檔案已經下載成功，只是這次狀態更新失敗（Supabase 走標準 REST API，這種情況比過去用
+    // Google Apps Script/JSONP 時少見很多，但仍保留一次背景重新整理當保險）。
+    loadCustomers(false);
+    toast('err', `檔案已下載，但狀態更新失敗，已重新整理最新狀態，請確認表格是否正確（${err.message}）`);
+  } finally {
+    setLoading(false);
+  }
+});
+
+/* ---------------- 初始化 ---------------- */
+const _fvStamp = document.getElementById('frontendVersionStamp');
+if (_fvStamp) _fvStamp.textContent = FRONTEND_VERSION; else console.warn('找不到版本標示欄位，頁面可能不是最新版本');
+renderTableHead();
+if (!sb) {
+  toast('err', sbInitError || '尚未設定 Supabase 連線資訊，請在 app.js 開頭填入 SUPABASE_URL 與 SUPABASE_ANON_KEY 後再重新整理');
+  console.error('[Supabase 設定問題]', sbInitError);
+} else {
+  loadCustomers(true);
+  setupRealtime();
+  // Realtime 是主要同步機制，這裡的輪詢降為低頻率保險，避免忘了在 Supabase 後台開 Realtime 時完全沒有同步
+  let pollTimer = setInterval(() => { if (!document.hidden) loadCustomers(false); }, 60000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) loadCustomers(false); // 回到分頁時立即補一次，不用等下一輪
+  });
+}
