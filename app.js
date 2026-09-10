@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-09-supabase-v4';
+const FRONTEND_VERSION = '2026-09-09-supabase-v5';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -202,9 +202,21 @@ document.querySelectorAll('.overlay').forEach(ov => {
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+// 清掉常見的數值雜訊：千分位逗號、貨幣符號、多餘空白、括號表示的負數（會計格式）
+function cleanNumericString(v) {
+  if (v == null) return '';
+  let s = String(v).trim();
+  if (!s) return '';
+  const negParen = /^\((.+)\)$/.exec(s);
+  if (negParen) s = '-' + negParen[1];
+  s = s.replace(/[,$￥\s]|NT\$?/gi, '');
+  return s;
+}
 function toNumberIfPossible(v) {
   if (v === '' || v == null) return null;
-  const n = Number(String(v).replace(/,/g, ''));
+  const cleaned = cleanNumericString(v);
+  if (cleaned === '') return null;
+  const n = Number(cleaned);
   return Number.isFinite(n) ? n : v;
 }
 
@@ -244,7 +256,17 @@ async function readWorkbookRaw(file) {
         const firstSheetName = wb.SheetNames[0];
         const ws = wb.Sheets[firstSheetName];
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
-        resolve({ sheetName: firstSheetName, rows });
+        // 客戶的報價單常常會用 Excel「隱藏列」處理不報價/停用的品項，這種列不該被當成資料匯入。
+        // 偵測隱藏列並清空內容，讓既有「整列空白就跳過」的邏輯自然把它們排除掉。
+        const rowMeta = ws['!rows'] || [];
+        let hiddenCount = 0;
+        rowMeta.forEach((meta, idx) => {
+          if (meta && meta.hidden && rows[idx] && rows[idx].some(c => String(c || '').trim() !== '')) {
+            rows[idx] = [];
+            hiddenCount++;
+          }
+        });
+        resolve({ sheetName: firstSheetName, rows, hiddenCount });
       } catch (err) { reject(err); }
     };
     reader.onerror = () => reject(new Error('檔案讀取失敗'));
@@ -481,22 +503,24 @@ function renderTableHead() {
     </button>`;
   if (state.activeTab === 'noCode') {
     thead.innerHTML = `<tr>
-      <th style="width:110px;">客戶代號</th>
-      <th>客戶名稱</th>
-      <th style="width:110px;">報價週期 ${cycleFilterBtn}</th>
+      <th style="width:100px;">客戶代號</th>
+      <th style="width:200px;">客戶名稱</th>
+      <th style="width:100px;">報價週期 ${cycleFilterBtn}</th>
       <th style="width:110px;">料號對照表</th>
-      <th style="width:110px;">匯出格式</th>
-      <th style="width:160px;">匯出狀態</th>
+      <th style="width:100px;">匯出格式</th>
+      <th style="width:150px;">匯出狀態</th>
       <th style="width:320px;text-align:right;">操作</th>
+      <th></th>
     </tr>`;
   } else {
     thead.innerHTML = `<tr>
-      <th style="width:110px;">客戶代號</th>
-      <th>客戶名稱</th>
-      <th style="width:110px;">報價週期 ${cycleFilterBtn}</th>
-      <th style="width:110px;">匯出格式</th>
-      <th style="width:160px;">匯出狀態</th>
+      <th style="width:100px;">客戶代號</th>
+      <th style="width:200px;">客戶名稱</th>
+      <th style="width:100px;">報價週期 ${cycleFilterBtn}</th>
+      <th style="width:100px;">匯出格式</th>
+      <th style="width:150px;">匯出狀態</th>
       <th style="width:260px;text-align:right;">操作</th>
+      <th></th>
     </tr>`;
   }
   updateFilterIconStates();
@@ -544,6 +568,7 @@ function renderTable() {
           ${actionBtn}
           ${historyMenuBtns}
         </td>
+        <td></td>
       </tr>`;
     }
     return `<tr>
@@ -556,6 +581,7 @@ function renderTable() {
         ${actionBtn}
         ${historyMenuBtns}
       </td>
+      <td></td>
     </tr>`;
   }).join('');
 }
@@ -972,6 +998,13 @@ function setupMultiDropzone(zoneId, inputId, onFiles) {
   ['dragleave', 'drop'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.remove('drag'); }));
   zone.addEventListener('drop', e => { const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []); if (files.length) onFiles(files); });
 }
+// 純拖曳版本（不綁點擊開檔案，因為批次匯入報價單改用兩個明確按鈕分別觸發「選檔案」跟「選資料夾」）
+function setupDropOnly(zoneId, onFiles) {
+  const zone = document.getElementById(zoneId);
+  ['dragenter', 'dragover'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.add('drag'); }));
+  ['dragleave', 'drop'].forEach(evt => zone.addEventListener(evt, e => { e.preventDefault(); zone.classList.remove('drag'); }));
+  zone.addEventListener('drop', e => { const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []); if (files.length) onFiles(files); });
+}
 
 setupDropzone('batchDropzone', 'batchFileInput', async file => {
   try {
@@ -1070,20 +1103,46 @@ document.getElementById('btnBatchQuotes').addEventListener('click', () => {
   document.getElementById('batchQuotesPreviewWrap').style.display = 'none';
   document.getElementById('batchQuotesProgressWrap').style.display = 'none';
   document.getElementById('batchQuotesFileInput').value = '';
+  document.getElementById('batchQuotesFolderInput').value = '';
   document.getElementById('btnConfirmBatchQuotes').disabled = true;
   openModal('ovBatchQuotes');
 });
 
-setupMultiDropzone('batchQuotesDropzone', 'batchQuotesFileInput', files => {
-  batchQuotesFiles = files.map(file => {
+// 累加式加入檔案：同檔名再選一次會「更新」那一筆（重新比對），不是整批清掉重來；
+// 這樣才能分好幾次選檔案、或選檔案後再選資料夾補充，彼此不會互相蓋掉。
+function addBatchQuotesFiles(newFiles) {
+  const validExt = /\.(xlsx|xls|csv)$/i;
+  const filtered = newFiles.filter(f => validExt.test(f.name));
+  if (!filtered.length) { toast('err', '選取的項目裡沒有 .xlsx/.xls/.csv 格式的檔案'); return; }
+  filtered.forEach(file => {
     const matches = matchCustomersByFilename(file.name);
     let status, customer = null;
     if (matches.length === 1) { status = 'matched'; customer = matches[0]; }
     else if (matches.length === 0) { status = 'unmatched'; }
     else { status = 'ambiguous'; }
-    return { file, matches, status, customer };
+    const entry = { file, matches, status, customer };
+    const existingIdx = batchQuotesFiles.findIndex(f => f.file.name === file.name);
+    if (existingIdx > -1) batchQuotesFiles[existingIdx] = entry;
+    else batchQuotesFiles.push(entry);
   });
   renderBatchQuotesPreview();
+}
+
+document.getElementById('btnBatchQuotesPickFiles').addEventListener('click', () => document.getElementById('batchQuotesFileInput').click());
+document.getElementById('btnBatchQuotesPickFolder').addEventListener('click', () => document.getElementById('batchQuotesFolderInput').click());
+document.getElementById('batchQuotesFileInput').addEventListener('change', e => {
+  if (e.target.files.length) addBatchQuotesFiles(Array.from(e.target.files));
+  e.target.value = ''; // 清空 value，這樣同一批檔案要再選一次時 change 事件才會再觸發
+});
+document.getElementById('batchQuotesFolderInput').addEventListener('change', e => {
+  if (e.target.files.length) addBatchQuotesFiles(Array.from(e.target.files));
+  e.target.value = '';
+});
+setupDropOnly('batchQuotesDropzone', files => addBatchQuotesFiles(files));
+document.getElementById('btnBatchQuotesClear').addEventListener('click', () => {
+  batchQuotesFiles = [];
+  document.getElementById('batchQuotesPreviewWrap').style.display = 'none';
+  document.getElementById('btnConfirmBatchQuotes').disabled = true;
 });
 
 function renderBatchQuotesPreview() {
@@ -1108,6 +1167,7 @@ document.getElementById('btnConfirmBatchQuotes').addEventListener('click', async
   document.getElementById('batchQuotesProgressWrap').style.display = 'block';
   document.getElementById('btnConfirmBatchQuotes').disabled = true;
   let okN = 0, failN = 0;
+  let totalHidden = 0;
   const failLog = [];
   try {
     await ensureExcelJS();
@@ -1115,7 +1175,8 @@ document.getElementById('btnConfirmBatchQuotes').addEventListener('click', async
       const job = jobs[i];
       document.getElementById('batchQuotesProgress').textContent = `處理中 ${i + 1}/${jobs.length}：${job.customer.code} ${job.customer.name || ''}`;
       try {
-        const { rows } = await readWorkbookRaw(job.file);
+        const { rows, hiddenCount } = await readWorkbookRaw(job.file);
+        totalHidden += hiddenCount || 0;
         const noCode = job.customer.productCodeMode === '無貨號';
         const previousCodes = await fetchPreviousCodes(job.customer.code);
         const itemCodeLookup = noCode ? await fetchItemCodeLookup(job.customer.code) : [];
@@ -1135,7 +1196,7 @@ document.getElementById('btnConfirmBatchQuotes').addEventListener('click', async
     }
   } finally {
     document.getElementById('batchQuotesProgress').textContent =
-      `完成：成功 ${okN} 筆，失敗 ${failN} 筆${failLog.length ? '（' + failLog.join('；') + '）' : ''}`;
+      `完成：成功 ${okN} 筆，失敗 ${failN} 筆${totalHidden ? `（共排除 ${totalHidden} 列隱藏列）` : ''}${failLog.length ? '（' + failLog.join('；') + '）' : ''}`;
     document.getElementById('btnConfirmBatchQuotes').disabled = false;
     toast(failN ? 'err' : 'ok', `批次匯出完成：成功 ${okN} 筆${failN ? ('，失敗 ' + failN + ' 筆') : ''}`);
   }
@@ -1180,7 +1241,7 @@ setupDropzone('wizDropzone', 'wizFileInput', async file => {
   try {
     setLoading(true, '解析檔案中…');
     const noCode = state.wizard.customer.productCodeMode === '無貨號';
-    const [{ rows }, previousCodes, itemCodeLookup] = await Promise.all([
+    const [{ rows, hiddenCount }, previousCodes, itemCodeLookup] = await Promise.all([
       readWorkbookRaw(file),
       fetchPreviousCodes(state.wizard.customer.code),
       noCode ? fetchItemCodeLookup(state.wizard.customer.code) : Promise.resolve([])
@@ -1190,6 +1251,7 @@ setupDropzone('wizDropzone', 'wizFileInput', async file => {
     state.wizard.previousCodes = previousCodes;
     state.wizard.itemCodeLookup = itemCodeLookup;
     state.wizard.isFirstEverExport = !previousCodes.length;
+    if (hiddenCount) toast('ok', `已自動排除 ${hiddenCount} 列隱藏列，不會列入辨識`);
     if (noCode && !itemCodeLookup.length) {
       setLoading(false);
       toast('err', '這個客戶還沒有上傳「料號對照表」，請先在客戶列表點「上傳料號對照表」設定好，才能比對出料號');
