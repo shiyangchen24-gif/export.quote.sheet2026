@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-10-supabase-v6';
+const FRONTEND_VERSION = '2026-09-10-supabase-v7';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -512,7 +512,7 @@ function renderTableHead() {
       <th style="width:110px;">料號對照表</th>
       <th style="width:100px;">匯出格式</th>
       <th style="width:150px;">匯出狀態</th>
-      <th style="width:340px;">操作</th>
+      <th style="width:580px;">操作</th>
       <th></th>
     </tr>`;
   } else {
@@ -523,7 +523,7 @@ function renderTableHead() {
       <th style="width:100px;">報價週期 ${cycleFilterBtn}</th>
       <th style="width:100px;">匯出格式</th>
       <th style="width:150px;">匯出狀態</th>
-      <th style="width:280px;">操作</th>
+      <th style="width:460px;">操作</th>
       <th></th>
     </tr>`;
   }
@@ -551,7 +551,9 @@ function renderTable() {
     const actionBtn = mapSet
       ? `<button class="btn small btn-export" data-act="export" data-code="${escapeHtml(c.code)}">匯出報價單</button>`
       : `<button class="btn small btn-upload" data-act="upload" data-code="${escapeHtml(c.code)}">上傳報價單</button>`;
-    const checked = state.selectedCodes.has(c.code) ? 'checked' : '';
+    const isSelected = state.selectedCodes.has(c.code);
+    const checked = isSelected ? 'checked' : '';
+    const rowCls = isSelected ? ' class="row-selected"' : '';
     const checkboxCell = `<td class="selcol"><input type="checkbox" class="rowCheckbox" data-code="${escapeHtml(c.code)}" ${checked}></td>`;
     const textLinks = `
         <button class="text-link" data-act="history" data-code="${escapeHtml(c.code)}">查看紀錄</button>
@@ -564,7 +566,7 @@ function renderTable() {
       const lookupBadge = lookupCount > 0
         ? `<span class="badge badge-green">已設定</span><div class="hint" style="margin-top:3px;">${lookupCount} 筆</div>`
         : `<span class="badge badge-red">尚未設定</span>`;
-      return `<tr>
+      return `<tr${rowCls}>
         ${checkboxCell}
         <td class="code">${escapeHtml(c.code)}</td>
         <td>${escapeHtml(c.name)}</td>
@@ -580,7 +582,7 @@ function renderTable() {
         <td></td>
       </tr>`;
     }
-    return `<tr>
+    return `<tr${rowCls}>
       ${checkboxCell}
       <td class="code">${escapeHtml(c.code)}</td>
       <td>${escapeHtml(c.name)}</td>
@@ -654,8 +656,21 @@ document.getElementById('custTbody').addEventListener('change', e => {
   const code = cb.getAttribute('data-code');
   if (cb.checked) state.selectedCodes.add(code);
   else state.selectedCodes.delete(code);
+  const tr = cb.closest('tr');
+  if (tr) tr.classList.toggle('row-selected', cb.checked);
   updateBulkButtonsState();
   syncSelectAllCheckbox();
+});
+
+// 點擊列的其他地方（不是按鈕/文字連結/checkbox本身）也能切換該列勾選，不用一定要點中小方框
+document.getElementById('custTbody').addEventListener('click', e => {
+  if (e.target.closest('button[data-act]') || e.target.closest('input')) return;
+  const tr = e.target.closest('tr');
+  if (!tr) return;
+  const cb = tr.querySelector('input.rowCheckbox');
+  if (!cb) return;
+  cb.checked = !cb.checked;
+  cb.dispatchEvent(new Event('change', { bubbles: true }));
 });
 
 async function unexportCustomer(customer) {
