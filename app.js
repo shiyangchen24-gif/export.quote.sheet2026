@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-10-supabase-v7';
+const FRONTEND_VERSION = '2026-09-11-supabase-v8';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -308,9 +308,9 @@ async function saveItemCodeLookup(code, lookupArray) {
 async function loadMasterItems() {
   try {
     assertSb();
-    const { data, error } = await sb.from('master_items').select('item_code,item_name,unit').order('item_code');
+    const { data, error } = await sb.from('master_items').select('item_code,item_name,unit,spec_code,grade').order('item_code');
     if (error) throw new Error(error.message);
-    state.masterItems = (data || []).map(r => ({ itemCode: r.item_code, itemName: r.item_name || '', unit: r.unit || '' }));
+    state.masterItems = (data || []).map(r => ({ itemCode: r.item_code, itemName: r.item_name || '', unit: r.unit || '', specCode: r.spec_code || '', grade: r.grade || '' }));
     const countEl = document.getElementById('masterItemsCount');
     if (countEl) countEl.textContent = state.masterItems.length;
   } catch (err) {
@@ -322,7 +322,7 @@ async function loadMasterItems() {
 // 由使用者自行到 Supabase 後台刪除比較保險）
 async function saveMasterItems(rows) {
   assertSb();
-  const payload = rows.map(r => ({ item_code: r.itemCode, item_name: r.itemName, unit: r.unit, updated_at: new Date().toISOString() }));
+  const payload = rows.map(r => ({ item_code: r.itemCode, item_name: r.itemName, unit: r.unit, spec_code: r.specCode || '', grade: r.grade || '', updated_at: new Date().toISOString() }));
   const CHUNK = 500;
   for (let i = 0; i < payload.length; i += CHUNK) {
     const chunk = payload.slice(i, i + CHUNK);
@@ -335,6 +335,14 @@ async function saveMasterItems(rows) {
 // 核心轉換：套用欄位對應 + 無單價自動補0 + 與上次匯出比對新增品項，回傳排序後的紀錄陣列
 // itemCodeLookup：該客戶自己的「客戶品名 → 忠欣料號」對照（只有無貨號客戶會用到）
 // masterItems：忠欣品項主檔（全公司共用），用比對到的料號回填官方單位
+// 比對「有沒有比過上次」用的識別鍵：無貨號客戶一旦比對到料號，就該用料號比（同一個品項，
+// 客戶下次打的名稱字句可能有些微差異，但只要比對到同一個忠欣料號就該視為同一項）；
+// 真的比對不到料號時才退回用客戶自己的品名。有貨號客戶維持原本直接用貨號。
+function getDiffKey(rec, productCodeMode) {
+  if (productCodeMode === '無貨號') return rec['貨號'] || rec['品名'];
+  return rec['貨號'];
+}
+
 function buildConvertedRecords(rawRows, dataStartRowIdx, columnMap, productCodeMode, previousCodes, itemCodeLookup, masterItems) {
   const identityField = getIdentityField(productCodeMode);
   const prevSet = new Set(previousCodes || []);
@@ -365,7 +373,7 @@ function buildConvertedRecords(rawRows, dataStartRowIdx, columnMap, productCodeM
         rec._unmatched = true;
       }
     }
-    rec._isNew = prevSet.size > 0 ? !prevSet.has(rec[identityField]) : false;
+    rec._isNew = prevSet.size > 0 ? !prevSet.has(getDiffKey(rec, productCodeMode)) : false;
     recs.push(rec);
   }
   // 排序：一般品項 → 新增品項(黃底) → 比對不到料號(橘底，最需要處理，排最後最顯眼)
@@ -442,12 +450,108 @@ async function exportWorkbook(customer, records) {
   return outName;
 }
 
-// 匯出成功後：更新匯出狀態，並把這次的品項識別值存起來供下次比對「新增品項」用。
+// 無貨號客戶的匯出格式跟有貨號客戶完全不同：輸出的是整份忠欣品項主檔（固定筆數、固定順序），
+// 客戶這次報價單比對到的單價填進對應料號那一列的 D 欄；沒被這個客戶報價的品項，D 欄就留空。
+// 比對不到料號的品項（customer 打的名稱在料號對照表裡找不到）沒有主檔列可以對應，
+// 額外附加在整份主檔之後，一樣秉持「不會被默默漏掉」的原則。
+async function exportNoCodeWorkbook(customer, records, masterItems) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('多客戶報價單格式');
+  const FONT_NAME = '微軟正黑體';
+  const FONT_SIZE = 12;
+  const THIN = { style: 'thin', color: { argb: 'FF000000' } };
+  const FONT_NORMAL = { name: FONT_NAME, size: FONT_SIZE };
+  const FONT_NEW = { name: FONT_NAME, size: FONT_SIZE, color: { argb: 'FFFF524D' } };
+  const FONT_UNMATCHED = { name: FONT_NAME, size: FONT_SIZE, color: { argb: 'FFB35400' } };
+  const FILL_NEW = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFDE5A' } };
+  const FILL_UNMATCHED = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE6D1' } };
+  const ALIGN_L = { horizontal: 'left', vertical: 'center' };
+  const ALIGN_R = { horizontal: 'right', vertical: 'center' };
+  const PRICE_FMT = '#,##0_);[Red](#,##0)';
+
+  ws.columns = [{ width: 24 }, { width: 31 }, { width: 11 }, { width: 10 }, { width: 14 }, { width: 18 }];
+
+  // 比對到的價格，用忠欣品項代號當 key；同時記錄這次是不是「新增」（上次沒報過這個代號）
+  const priceByCode = new Map();
+  records.forEach(rec => {
+    if (rec._unmatched) return;
+    priceByCode.set(rec['貨號'], { price: toNumberIfPossible(rec['單價']), isNew: rec._isNew });
+  });
+  const unmatchedRecs = records.filter(r => r._unmatched);
+
+  // 第1列：對象識別固定為 1（個別客戶報價，非群組報價）
+  const row1 = ws.addRow(['對象識別', '', '', '', '', 1]);
+  row1.eachCell({ includeEmpty: true }, cell => { cell.font = FONT_NORMAL; cell.alignment = ALIGN_L; cell.border = { top: THIN, bottom: THIN }; });
+  row1.getCell(6).numFmt = '_-* #,##0_-;-* #,##0_-;_-* "-"??_-;_-@_-';
+
+  // 第2列：客戶代號填入 F 欄
+  const row2 = ws.addRow(['客戶代號/報價群組代號', '', '', '', '', customer.code]);
+  row2.getCell(1).font = FONT_NORMAL; row2.getCell(1).alignment = ALIGN_L; row2.getCell(1).border = { bottom: THIN };
+  const f2 = row2.getCell(6);
+  f2.font = FONT_NORMAL; f2.alignment = ALIGN_L; f2.border = { top: THIN, bottom: THIN }; f2.numFmt = '@';
+
+  // 第3列：欄位標題（品項代號/品項名稱/規格代號/規格/等級），客戶名稱填入 F 欄；E 欄右側細框線是後面所有列的分隔線
+  const row3 = ws.addRow(['品項代號', '品項名稱', '規格代號', '規格', '等級', customer.name || '']);
+  row3.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    cell.font = FONT_NORMAL;
+    cell.alignment = ALIGN_L;
+    cell.border = colNumber === 5 ? { top: THIN, bottom: THIN, right: THIN } : { top: THIN, bottom: THIN };
+  });
+  row3.getCell(6).numFmt = '@';
+
+  // 第4列起：忠欣品項主檔全部列出，比對到的單價填入 F 欄；E 欄右側細框線貫穿整張表
+  const rowValues = masterItems.map(item => {
+    const match = priceByCode.get(item.itemCode);
+    return [item.itemCode, item.itemName, item.specCode || '', item.unit, item.grade || '', match ? match.price : null];
+  });
+  const addedRows = ws.addRows(rowValues);
+  addedRows.forEach((row, i) => {
+    const item = masterItems[i];
+    const match = priceByCode.get(item.itemCode);
+    const isNew = !!(match && match.isNew);
+    const font = isNew ? FONT_NEW : FONT_NORMAL;
+    row.getCell(1).alignment = ALIGN_R;
+    row.getCell(3).numFmt = '@';
+    row.getCell(6).numFmt = PRICE_FMT;
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      cell.font = font;
+      if (colNumber !== 1 && colNumber !== 6) cell.alignment = ALIGN_L;
+      if (colNumber === 6) cell.alignment = ALIGN_R;
+      if (colNumber === 5) cell.border = { right: THIN };
+      if (isNew) cell.fill = FILL_NEW;
+    });
+  });
+
+  // 比對不到料號的品項：主檔沒有對應列可以填，附加在最後，橘底標示提醒需要補上料號對照表
+  if (unmatchedRecs.length) {
+    const noteRow = ws.addRow(['', `— 以下 ${unmatchedRecs.length} 項客戶有報價，但在料號對照表找不到對應的忠欣品項代號，請確認 —`, '', '', '', '']);
+    noteRow.eachCell({ includeEmpty: true }, cell => { cell.font = { name: FONT_NAME, size: FONT_SIZE, italic: true, color: { argb: 'FFB35400' } }; });
+    const unmatchedRows = unmatchedRecs.map(rec => ['', rec['品名'] || '', '', rec['單位'] || '', '', toNumberIfPossible(rec['單價'])]);
+    const addedUnmatchedRows = ws.addRows(unmatchedRows);
+    addedUnmatchedRows.forEach(row => {
+      row.getCell(6).numFmt = PRICE_FMT;
+      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        cell.font = FONT_UNMATCHED;
+        cell.alignment = colNumber === 6 ? ALIGN_R : ALIGN_L;
+        if (colNumber === 5) cell.border = { right: THIN };
+        cell.fill = FILL_UNMATCHED;
+      });
+    });
+  }
+
+  const buf = await wb.xlsx.writeBuffer();
+  const today = new Date();
+  const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+  const outName = `${customer.code}_${customer.name || ''}_報價單匯入_${stamp}.xlsx`;
+  saveAs(new Blob([buf], { type: 'application/octet-stream' }), outName);
+  return outName;
+}
+
+
 // Supabase 的 jsonb 欄位沒有 GAS 網址長度那種限制，一次寫入即可，不用再分批。
 async function persistExportResult(customer, records, outName) {
   assertSb();
-  const identityField = getIdentityField(customer.productCodeMode);
-  const codes = records.map(r => r[identityField]).filter(Boolean);
+  const codes = records.map(r => getDiffKey(r, customer.productCodeMode)).filter(Boolean);
   const { data, error } = await sb.from('customers').update({
     export_status: '已匯出',
     last_export_time: new Date().toISOString(),
@@ -851,10 +955,12 @@ setupDropzone('masterItemsDropzone', 'masterItemsFileInput', async file => {
     const { rows } = await readWorkbookRaw(file);
     if (!rows.length) { toast('err', '檔案沒有資料'); return; }
     const headerRow = rows[0].map(h => String(h || '').trim());
-    const codeIdx = headerRow.findIndex(h => /料號|品號|產品編號/.test(h));
-    const nameIdx = headerRow.findIndex(h => /品名|名稱|品項/.test(h));
-    const unitIdx = headerRow.findIndex(h => /單位/.test(h));
-    if (codeIdx === -1 || nameIdx === -1) { toast('err', '找不到「料號」或「品項名稱」欄位，請確認第一列是標題列'); return; }
+    const codeIdx = headerRow.findIndex(h => /品項代號|料號|品號|產品編號/.test(h));
+    const nameIdx = headerRow.findIndex(h => /品項名稱|品名|名稱/.test(h));
+    const specCodeIdx = headerRow.findIndex(h => /規格代號/.test(h));
+    const unitIdx = headerRow.findIndex((h, idx) => idx !== specCodeIdx && /規格|單位/.test(h));
+    const gradeIdx = headerRow.findIndex(h => /等級/.test(h));
+    if (codeIdx === -1 || nameIdx === -1) { toast('err', '找不到「品項代號」或「品項名稱」欄位，請確認第一列是標題列'); return; }
     masterItemsParsed = [];
     for (let i = 1; i < rows.length; i++) {
       const itemCode = String(rows[i][codeIdx] || '').trim();
@@ -862,13 +968,16 @@ setupDropzone('masterItemsDropzone', 'masterItemsFileInput', async file => {
       masterItemsParsed.push({
         itemCode,
         itemName: String(rows[i][nameIdx] || '').trim(),
-        unit: unitIdx > -1 ? String(rows[i][unitIdx] || '').trim() : ''
+        unit: unitIdx > -1 ? String(rows[i][unitIdx] || '').trim() : '',
+        specCode: specCodeIdx > -1 ? String(rows[i][specCodeIdx] || '').trim() : '',
+        grade: gradeIdx > -1 ? String(rows[i][gradeIdx] || '').trim() : ''
       });
     }
-    document.getElementById('masterItemsSummary').textContent = `辨識到 ${masterItemsParsed.length} 筆品項，確認後會整份取代目前的忠欣品項主檔`;
+    document.getElementById('masterItemsSummary').textContent = `辨識到 ${masterItemsParsed.length} 筆品項，確認後會整份取代目前的忠欣品項主檔` +
+      (specCodeIdx === -1 ? '（沒有找到「規格代號」欄位，這欄留空）' : '');
     const table = document.getElementById('masterItemsPreviewTable');
-    table.innerHTML = '<thead><tr><th>料號</th><th>品項名稱</th><th>單位</th></tr></thead><tbody>' +
-      masterItemsParsed.slice(0, 200).map(m => `<tr><td class="mono">${escapeHtml(m.itemCode)}</td><td>${escapeHtml(m.itemName)}</td><td>${escapeHtml(m.unit)}</td></tr>`).join('') +
+    table.innerHTML = '<thead><tr><th>品項代號</th><th>品項名稱</th><th>規格代號</th><th>規格</th><th>等級</th></tr></thead><tbody>' +
+      masterItemsParsed.slice(0, 200).map(m => `<tr><td class="mono">${escapeHtml(m.itemCode)}</td><td>${escapeHtml(m.itemName)}</td><td class="mono">${escapeHtml(m.specCode)}</td><td>${escapeHtml(m.unit)}</td><td>${escapeHtml(m.grade)}</td></tr>`).join('') +
       '</tbody>';
     document.getElementById('masterItemsPreviewWrap').style.display = 'block';
     document.getElementById('btnConfirmMasterItems').disabled = masterItemsParsed.length === 0;
@@ -903,20 +1012,23 @@ setupDropzone('lookupDropzone', 'lookupFileInput', async file => {
     const { rows } = await readWorkbookRaw(file);
     if (!rows.length) { toast('err', '檔案沒有資料'); return; }
     const headerRow = rows[0].map(h => String(h || '').trim());
-    const nameIdx = headerRow.findIndex(h => /品名|名稱/.test(h));
+    const custNameIdx = headerRow.findIndex(h => h.includes('客戶') && /品名|名稱/.test(h));
+    const officialNameIdx = headerRow.findIndex(h => h.includes('忠欣') && /品名|名稱/.test(h));
     const codeIdx = headerRow.findIndex(h => /料號|貨號|品號/.test(h));
-    if (nameIdx === -1 || codeIdx === -1) { toast('err', '找不到「客戶品名」或「料號」欄位，請確認第一列是標題列'); return; }
+    if (custNameIdx === -1 || codeIdx === -1) { toast('err', '找不到「客戶品項名稱」或「忠欣料號」欄位，請確認第一列是標題列'); return; }
     lookupParsed = [];
     for (let i = 1; i < rows.length; i++) {
-      const name = String(rows[i][nameIdx] || '').trim();
-      const code = String(rows[i][codeIdx] || '').trim();
-      if (!name || !code) continue;
-      lookupParsed.push({ name, code });
+      const name = String(rows[i][custNameIdx] || '').trim();
+      const itemCode = String(rows[i][codeIdx] || '').trim();
+      if (!name || !itemCode) continue;
+      const itemName = officialNameIdx > -1 ? String(rows[i][officialNameIdx] || '').trim() : '';
+      lookupParsed.push({ name, code: itemCode, itemName });
     }
-    document.getElementById('lookupSummary').textContent = `辨識到 ${lookupParsed.length} 筆對應，確認後會整份取代這個客戶目前的料號對照表`;
+    document.getElementById('lookupSummary').textContent = `辨識到 ${lookupParsed.length} 筆對應，確認後會整份取代這個客戶目前的料號對照表` +
+      (officialNameIdx === -1 ? '（沒有找到「忠欣品項名稱」欄位，這欄留空不影響比對）' : '');
     const table = document.getElementById('lookupPreviewTable');
-    table.innerHTML = '<thead><tr><th>客戶品名</th><th>忠欣料號</th></tr></thead><tbody>' +
-      lookupParsed.slice(0, 200).map(x => `<tr><td>${escapeHtml(x.name)}</td><td class="mono">${escapeHtml(x.code)}</td></tr>`).join('') +
+    table.innerHTML = '<thead><tr><th>客戶品項名稱</th><th>忠欣品項名稱</th><th>忠欣料號</th></tr></thead><tbody>' +
+      lookupParsed.slice(0, 200).map(x => `<tr><td>${escapeHtml(x.name)}</td><td>${escapeHtml(x.itemName)}</td><td class="mono">${escapeHtml(x.code)}</td></tr>`).join('') +
       '</tbody>';
     document.getElementById('lookupPreviewWrap').style.display = 'block';
     document.getElementById('btnConfirmLookup').disabled = lookupParsed.length === 0;
@@ -1301,7 +1413,9 @@ document.getElementById('btnConfirmBatchQuotes').addEventListener('click', async
         if (noCode && !state.masterItems.length) await loadMasterItems();
         const records = buildConvertedRecords(rows, job.customer.mapping.dataStartRowIdx, job.customer.mapping.columnMap, job.customer.productCodeMode, previousCodes, itemCodeLookup, state.masterItems);
         if (!records.length) throw new Error('沒有解析到任何品項，請確認欄位對應是否仍然正確');
-        const outName = await exportWorkbook(job.customer, records);
+        const outName = noCode
+          ? await exportNoCodeWorkbook(job.customer, records, state.masterItems)
+          : await exportWorkbook(job.customer, records);
         const res = await persistExportResult(job.customer, records, outName);
         if (!res.ok) throw new Error(res.error || '更新狀態失敗');
         upsertCustomer(res.customer);
@@ -1498,6 +1612,7 @@ function computeConverted() {
 
 function renderResultStep() {
   const recs = state.wizard.convertedRecords;
+  const customer = state.wizard.customer;
   const total = recs.length;
   const newCount = recs.filter(r => r._isNew).length;
   const unmatchedCount = recs.filter(r => r._unmatched).length;
@@ -1505,16 +1620,29 @@ function renderResultStep() {
   if (state.wizard.isFirstEverExport) {
     extraPill = `<div class="pill">首次匯出，之後上傳可自動比對新增品項</div>`;
   } else if (newCount) {
-    extraPill = `<div class="pill warn">新增品項 ${newCount} 項（與上次匯出比較，黃底紅字並排至最後）</div>`;
+    extraPill = `<div class="pill warn">新增品項 ${newCount} 項（與上次匯出比較，黃底標示）</div>`;
   } else {
     extraPill = `<div class="pill">與上次匯出比較，沒有新增品項</div>`;
   }
   const unmatchedPill = unmatchedCount
-    ? `<div class="pill" style="background:#ffe6d1;color:var(--orange-action);">比對不到料號 ${unmatchedCount} 項（橘底，仍會匯出但貨號留空，請補上料號對照表後重新匯出）</div>`
+    ? `<div class="pill" style="background:#ffe6d1;color:var(--orange-action);">比對不到忠欣品項代號 ${unmatchedCount} 項（橘底，仍會匯出但代號留空，請補上料號對照表後重新匯出）</div>`
     : '';
   document.getElementById('wizResultSummary').innerHTML = `<div class="pill ok">共 ${total} 項</div>${extraPill}${unmatchedPill}`;
   const table = document.getElementById('wizResultPreviewTable');
-  const customer = state.wizard.customer;
+
+  if (customer.productCodeMode === '無貨號') {
+    // 無貨號客戶的正式匯出檔是整份忠欣品項主檔（幾千列），這裡的預覽改成只顯示「這次客戶自己報了哪些品項」
+    // 以及有沒有比對到忠欣品項代號，不逐列預覽最終檔案本身（那樣會有幾千列，瀏覽器跟人眼都吃不消）。
+    const thead = '<thead><tr><th>客戶品項名稱</th><th>比對結果（忠欣品項代號）</th><th>單價</th></tr></thead>';
+    const body = '<tbody>' + recs.map(rec => {
+      const matchCell = rec._unmatched ? '未比對到' : escapeHtml(rec['貨號']);
+      const rowCls = rec._unmatched ? 'unmatched-row' : (rec._isNew ? 'new-item-row' : '');
+      return `<tr class="${rowCls}"><td>${escapeHtml(rec['品名'])}</td><td class="mono">${matchCell}</td><td>${escapeHtml(rec['單價'])}</td></tr>`;
+    }).join('') + '</tbody>';
+    table.innerHTML = thead + body;
+    return;
+  }
+
   const thead = '<thead><tr>' + OUTPUT_HEADERS.map(h => `<th>${h}</th>`).join('') + '</tr></thead>';
   const body = '<tbody>' + recs.map(rec => {
     const cells = OUTPUT_FIELD_ORDER.map((f, i) => {
@@ -1586,7 +1714,12 @@ document.getElementById('wizExport').addEventListener('click', async () => {
   try {
     await ensureExcelJS();
     setLoading(true, '產生匯出檔案…');
-    outName = await exportWorkbook(customer, convertedRecords);
+    if (customer.productCodeMode === '無貨號') {
+      if (!state.masterItems.length) await loadMasterItems();
+      outName = await exportNoCodeWorkbook(customer, convertedRecords, state.masterItems);
+    } else {
+      outName = await exportWorkbook(customer, convertedRecords);
+    }
   } catch (err) {
     setLoading(false);
     toast('err', '產生匯出檔案失敗：' + err.message);
