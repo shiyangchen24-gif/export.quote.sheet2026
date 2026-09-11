@@ -536,7 +536,7 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
     </div>
     <div class="modal-body">
       <div class="dropzone" id="masterItemsDropzone">
-        <strong>點擊選擇檔案</strong> 或拖曳 Excel 檔案到此處<br>第一列為標題，需包含「料號」「品項名稱」「單位」欄位
+        <strong>點擊選擇檔案</strong> 或拖曳 Excel 檔案到此處<br>第一列為標題，需包含「品項代號」「品項名稱」欄位；「規格代號」「規格」「等級」可省略
         <input type="file" id="masterItemsFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
       </div>
       <div id="masterItemsPreviewWrap" style="margin-top:14px;display:none;">
@@ -563,7 +563,7 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
     </div>
     <div class="modal-body">
       <div class="dropzone" id="lookupDropzone">
-        <strong>點擊選擇檔案</strong> 或拖曳 Excel 檔案到此處<br>第一列為標題，需包含「客戶品名」「料號」欄位
+        <strong>點擊選擇檔案</strong> 或拖曳 Excel 檔案到此處<br>第一列為標題，需包含「客戶品項名稱」「忠欣料號」欄位（「忠欣品項名稱」可省略）
         <input type="file" id="lookupFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
       </div>
       <div id="lookupPreviewWrap" style="margin-top:14px;display:none;">
@@ -675,6 +675,6 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-10-supabase-v7"></script>
+<script src="app.js?v=2026-09-11-supabase-v8"></script>
 </body>
 </html>
