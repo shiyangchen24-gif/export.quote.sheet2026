@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-12-supabase-v9';
+const FRONTEND_VERSION = '2026-09-13-supabase-v10';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -124,7 +124,7 @@ let state = {
 /* ---------------- 資料列轉換：Supabase 的 snake_case 欄位 → 前端慣用的 camelCase ---------------- */
 // 客戶清單查詢共用的欄位（不含 last_item_codes/item_code_lookup/quoted_prices 這幾個可能較大的欄位，
 // 那些只有真的要用時才單獨查，見 fetchPreviousCodes／fetchItemCodeLookup／fetchQuotedPrices）
-const CUSTOMER_SELECT_COLS = 'code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count,quoted_prices_count,last_quote_upload_time';
+const CUSTOMER_SELECT_COLS = 'code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count,quoted_prices_count,last_quote_upload_time,saved_records_count';
 
 function rowToCustomer(row) {
   return {
@@ -140,7 +140,8 @@ function rowToCustomer(row) {
     lastExportItemCount: row.last_export_item_count || 0,
     itemCodeLookupCount: row.item_code_lookup_count || 0,
     quotedPricesCount: row.quoted_prices_count || 0,
-    lastQuoteUploadTime: row.last_quote_upload_time || ''
+    lastQuoteUploadTime: row.last_quote_upload_time || '',
+    savedRecordsCount: row.saved_records_count || 0
   };
 }
 
@@ -339,6 +340,38 @@ async function saveQuotedPrices(customer, records) {
   return { ok: true, customer: rowToCustomer(data) };
 }
 
+/* ---------------- 有貨號客戶：報價也先儲存，之後批次匯出 ---------------- */
+async function fetchSavedRecords(code) {
+  try {
+    assertSb();
+    const { data, error } = await sb.from('customers').select('saved_records').eq('code', code).maybeSingle();
+    if (error || !data || !Array.isArray(data.saved_records)) return [];
+    return data.saved_records;
+  } catch (err) { return []; }
+}
+// 「上傳報價單」比對完成後不立即產生檔案，先把整理好的品項列存起來，之後用「批次匯出」把選取的
+// 客戶串成同一份檔案（客戶代號/客戶名稱是逐列欄位，天生就能跟其他客戶的列共存）。
+async function saveHasCodeRecords(customer, records) {
+  assertSb();
+  const codes = records.map(r => getDiffKey(r, customer.productCodeMode)).filter(Boolean);
+  const nowIso = new Date().toISOString();
+  const toSave = records.map(r => ({
+    貨號: r['貨號'] || '', 品名: r['品名'] || '', 單位: r['單位'] || '', 單價: r['單價'],
+    備註: r['備註'] || '', 產區品種: r['產區品種'] || '', 裝箱方式: r['裝箱方式'] || '',
+    包裝資材: r['包裝資材'] || '', 產地: r['產地'] || '', 不報價原因: r['不報價原因'] || '', 變價原因: r['變價原因'] || '',
+    _isNew: !!r._isNew
+  }));
+  const { data, error } = await sb.from('customers').update({
+    saved_records: toSave,
+    last_item_codes: codes,
+    last_quote_upload_time: nowIso,
+    last_export_item_count: records.length,
+    updated_at: nowIso
+  }).eq('code', customer.code).select(CUSTOMER_SELECT_COLS).single();
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, customer: rowToCustomer(data) };
+}
+
 /* ---------------- 忠欣品項主檔（全公司共用） ---------------- */
 async function loadMasterItems() {
   try {
@@ -395,7 +428,12 @@ function buildConvertedRecords(rawRows, dataStartRowIdx, columnMap, productCodeM
       rec[field] = v;
     });
     if (!rec[identityField]) continue;
+    const priceWasZeroOrBlank = !rec['單價'] || !String(rec['單價']).trim() || String(rec['單價']).trim() === '0';
     if (!rec['單價'] || !String(rec['單價']).trim()) rec['單價'] = '0'; // 無單價自動補0
+    // 有貨號客戶：單價是 0 或空白時，若客戶自己沒填「不報價原因」，自動補「時價」
+    if (!noCode && priceWasZeroOrBlank && (!rec['不報價原因'] || !String(rec['不報價原因']).trim())) {
+      rec['不報價原因'] = '時價';
+    }
     if (noCode) {
       const matchedCode = lookupMap.get(rec['品名']);
       if (matchedCode) {
@@ -419,7 +457,34 @@ function buildConvertedRecords(rawRows, dataStartRowIdx, columnMap, productCodeM
   return recs;
 }
 
-async function exportWorkbook(customer, records) {
+// 匯出檔案時跳出「另存新檔」視窗，讓使用者自己選要存在電腦的哪裡。
+// File System Access API 目前只有 Chrome/Edge 等 Chromium 系瀏覽器支援，Firefox/Safari 沒有，
+// 所以偵測不到就退回原本「直接下載到瀏覽器預設下載資料夾」的方式，不會讓功能整個掛掉。
+// 回傳 true 代表檔案已經存好（不管是用哪種方式）；回傳 false 代表使用者在另存新檔視窗按了取消。
+async function saveWorkbookFile(buffer, suggestedName) {
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{ description: 'Excel 檔案', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(buffer);
+      await writable.close();
+      return true;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return false; // 使用者自己按取消，不要接著又觸發預設下載
+      // 其他例外（少數瀏覽器版本問題等）就退回下面的預設下載方式
+    }
+  }
+  saveAs(new Blob([buffer], { type: 'application/octet-stream' }), suggestedName);
+  return true;
+}
+
+// 有貨號客戶的匯出：可以把「多個客戶」合併成一份檔案——客戶代號/客戶名稱本來就是逐列欄位，
+// 每位客戶各自的品項列直接串接在同一張表裡即可，不需要像無貨號客戶那樣分欄。
+// customersWithRecords: [{ customer, records }, ...]
+async function exportBatchWorkbook(customersWithRecords) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('匯入格式');
   const FONT_NAME = '微軟正黑體';
@@ -446,9 +511,15 @@ async function exportWorkbook(customer, records) {
   const widths = [12, 16, 12, 26, 14, 10, 16, 14, 14, 14, 10, 14, 14];
   ws.columns = widths.map(w => ({ width: w }));
 
+  // 攤平所有客戶的品項列：客戶代號/客戶名稱直接寫在每一列上，天生就能跟其他客戶的列共存在同一張表
+  const flatRows = [];
+  customersWithRecords.forEach(cw => {
+    cw.records.forEach(rec => flatRows.push({ customer: cw.customer, rec }));
+  });
+
   // 效能關鍵：先把所有列的值組成二維陣列，一次用 addRows 批次插入，
   // 比逐列呼叫 addRow 快上不少（ExcelJS 內部對批次插入有做優化）。
-  const rowValues = records.map(rec => [
+  const rowValues = flatRows.map(({ customer, rec }) => [
     customer.code,
     customer.name || '',
     rec['貨號'] || '',
@@ -465,7 +536,7 @@ async function exportWorkbook(customer, records) {
   ]);
   const addedRows = ws.addRows(rowValues);
   addedRows.forEach((row, i) => {
-    const rec = records[i];
+    const rec = flatRows[i].rec;
     row.getCell(3).numFmt = '@';
     const font = rec._unmatched ? FONT_UNMATCHED : (rec._isNew ? FONT_NEW : FONT_NORMAL);
     const fill = rec._unmatched ? FILL_UNMATCHED : (rec._isNew ? FILL_NEW : null);
@@ -480,9 +551,11 @@ async function exportWorkbook(customer, records) {
   const buf = await wb.xlsx.writeBuffer();
   const today = new Date();
   const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
-  const outName = `${customer.code}_${customer.name || ''}_報價單匯入_${stamp}.xlsx`;
-  saveAs(new Blob([buf], { type: 'application/octet-stream' }), outName);
-  return outName;
+  const outName = customersWithRecords.length === 1
+    ? `${customersWithRecords[0].customer.code}_${customersWithRecords[0].customer.name || ''}_報價單匯入_${stamp}.xlsx`
+    : `多客戶報價單_${customersWithRecords.length}家_${stamp}.xlsx`;
+  const saved = await saveWorkbookFile(buf, outName);
+  return saved ? outName : null;
 }
 
 // 無貨號客戶的匯出：可以把「多個客戶」合併成一份檔案——A-E 欄是共用的忠欣品項主檔（固定筆數、固定順序），
@@ -598,8 +671,8 @@ async function exportNoCodeBatchWorkbook(customersWithData, masterItems) {
   const outName = N === 1
     ? `${customersWithData[0].customer.code}_${customersWithData[0].customer.name || ''}_報價單匯入_${stamp}.xlsx`
     : `多客戶報價單_${N}家_${stamp}.xlsx`;
-  saveAs(new Blob([buf], { type: 'application/octet-stream' }), outName);
-  return outName;
+  const saved = await saveWorkbookFile(buf, outName);
+  return saved ? outName : null;
 }
 
 
@@ -682,7 +755,7 @@ function renderTableHead() {
       <th style="width:100px;">報價週期 ${cycleFilterBtn}</th>
       <th style="width:100px;">匯出格式</th>
       <th style="width:150px;">匯出狀態</th>
-      <th style="width:460px;">操作</th>
+      <th style="width:560px;">操作</th>
       <th></th>
     </tr>`;
   }
@@ -707,9 +780,11 @@ function renderTable() {
     const mapBadge = mapSet ? `<span class="badge badge-green">已設定</span>` : `<span class="badge badge-red">尚未設定</span>`;
     const expBadge = `<span class="badge ${exp.cls}">${exp.label}</span>` +
       (exp.due ? `<div class="hint" style="margin-top:3px;">${exp.overdue ? '⚠ 已逾期 ' : '到期 '}${formatDateShort(exp.due)}</div>` : '');
+    const savedCount = c.savedRecordsCount || 0;
     const actionBtn = mapSet
-      ? `<button class="btn small btn-export" data-act="export" data-code="${escapeHtml(c.code)}">匯出報價單</button>`
+      ? `<button class="btn small ${savedCount > 0 ? 'btn-secondary' : 'btn-upload'}" data-act="upload" data-code="${escapeHtml(c.code)}">${savedCount > 0 ? '重新上傳報價單' : '上傳報價單'}</button>`
       : `<button class="btn small btn-upload" data-act="upload" data-code="${escapeHtml(c.code)}">上傳報價單</button>`;
+    const savedHint = savedCount > 0 ? `<span class="hint" style="margin-right:14px;">已儲存 ${savedCount} 筆待匯出</span>` : '';
     const isSelected = state.selectedCodes.has(c.code);
     const checked = isSelected ? 'checked' : '';
     const rowCls = isSelected ? ' class="row-selected"' : '';
@@ -754,7 +829,7 @@ function renderTable() {
       <td>${mapBadge}</td>
       <td>${expBadge}</td>
       <td class="actions">
-        ${actionBtn}
+        ${actionBtn}${savedHint}
         ${textLinks}
       </td>
       <td></td>
@@ -772,7 +847,7 @@ document.getElementById('tabRow').addEventListener('click', e => {
   state.activeTab = tab;
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
   document.getElementById('masterItemsPanel').style.display = tab === 'noCode' ? 'flex' : 'none';
-  document.getElementById('btnBatchExportNoCode').style.display = tab === 'noCode' ? 'inline-flex' : 'none';
+  document.getElementById('btnBatchExport').style.display = 'inline-flex';
   // 統計卡篩選跟表頭欄位篩選都是「頁籤內」的概念，切頁籤時重置，避免帶著上個頁籤的篩選條件卻找不到東西
   state.statFilter = 'all';
   state.cycleFilter = 'all';
@@ -888,7 +963,7 @@ function updateBulkButtonsState() {
   const n = state.selectedCodes.size;
   const editBtn = document.getElementById('btnBatchEdit');
   const delBtn = document.getElementById('btnBatchDelete');
-  const exportBtn = document.getElementById('btnBatchExportNoCode');
+  const exportBtn = document.getElementById('btnBatchExport');
   editBtn.disabled = n === 0;
   delBtn.disabled = n === 0;
   exportBtn.disabled = n === 0;
@@ -933,27 +1008,47 @@ document.getElementById('btnBatchDelete').addEventListener('click', async () => 
 });
 
 /* ---------------- 批次匯出（無貨號客戶：合併成一份多欄檔案） ---------------- */
-document.getElementById('btnBatchExportNoCode').addEventListener('click', async () => {
+document.getElementById('btnBatchExport').addEventListener('click', async () => {
   const codes = Array.from(state.selectedCodes);
   if (!codes.length) return;
   const selectedCustomers = codes.map(code => state.customers.find(c => c.code === code)).filter(Boolean);
-  const ready = selectedCustomers.filter(c => (c.quotedPricesCount || 0) > 0);
-  const notReady = selectedCustomers.filter(c => !(c.quotedPricesCount > 0));
+  const noCode = state.activeTab === 'noCode';
+  const countField = noCode ? 'quotedPricesCount' : 'savedRecordsCount';
+  const ready = selectedCustomers.filter(c => (c[countField] || 0) > 0);
+  const notReady = selectedCustomers.filter(c => !(c[countField] > 0));
   if (!ready.length) { toast('err', '選取的客戶都還沒有「上傳報價單」儲存過資料，沒有東西可以匯出'); return; }
   if (notReady.length && !confirm(`選取的 ${selectedCustomers.length} 筆客戶中，有 ${notReady.length} 筆還沒上傳過報價單（${notReady.map(c => c.code).join('、')}），會被跳過不列入這次匯出。要繼續嗎？`)) return;
 
   setLoading(true, '準備匯出元件…');
   try {
     await ensureExcelJS();
-    if (!state.masterItems.length) await loadMasterItems();
-    setLoading(true, `讀取已儲存的報價資料…（${ready.length} 家客戶）`);
-    const customersWithData = [];
-    for (const c of ready) {
-      const prices = await fetchQuotedPrices(c.code);
-      customersWithData.push({ customer: c, matched: prices.matched, unmatched: prices.unmatched });
+    let outName;
+    if (noCode) {
+      if (!state.masterItems.length) await loadMasterItems();
+      setLoading(true, `讀取已儲存的報價資料…（${ready.length} 家客戶）`);
+      const customersWithData = [];
+      for (const c of ready) {
+        const prices = await fetchQuotedPrices(c.code);
+        customersWithData.push({ customer: c, matched: prices.matched, unmatched: prices.unmatched });
+      }
+      setLoading(true, '產生合併匯出檔案…');
+      outName = await exportNoCodeBatchWorkbook(customersWithData, state.masterItems);
+    } else {
+      setLoading(true, `讀取已儲存的報價資料…（${ready.length} 家客戶）`);
+      const customersWithRecords = [];
+      for (const c of ready) {
+        const records = await fetchSavedRecords(c.code);
+        customersWithRecords.push({ customer: c, records });
+      }
+      setLoading(true, '產生合併匯出檔案…');
+      outName = await exportBatchWorkbook(customersWithRecords);
     }
-    setLoading(true, '產生合併匯出檔案…');
-    const outName = await exportNoCodeBatchWorkbook(customersWithData, state.masterItems);
+
+    if (!outName) {
+      // 使用者在「另存新檔」視窗按了取消：不算失敗，但也不要標記已匯出（檔案根本沒存下來）
+      toast('ok', '已取消儲存，客戶的匯出狀態沒有變動');
+      return;
+    }
 
     setLoading(true, '更新匯出狀態…');
     const nowIso = new Date().toISOString();
@@ -1528,9 +1623,9 @@ document.getElementById('btnConfirmBatchQuotes').addEventListener('click', async
           if (!res.ok) throw new Error(res.error || '儲存失敗');
           upsertCustomer(res.customer);
         } else {
-          const outName = await exportWorkbook(job.customer, records);
-          const res = await persistExportResult(job.customer, records, outName);
-          if (!res.ok) throw new Error(res.error || '更新狀態失敗');
+          // 有貨號客戶現在也是先儲存，不在這裡直接匯出檔案
+          const res = await saveHasCodeRecords(job.customer, records);
+          if (!res.ok) throw new Error(res.error || '儲存失敗');
           upsertCustomer(res.customer);
         }
         okN++;
@@ -1557,10 +1652,10 @@ function colLetter(i) {
 function openWizard(customer) {
   state.wizard = { customer, rawRows: null, dataStartRowIdx: null, columnMap: {}, numCols: 0, convertedRecords: [], step: 1, usingSaved: false, fileName: '', previousCodes: [], itemCodeLookup: [], isFirstEverExport: true };
   const noCode = customer.productCodeMode === '無貨號';
-  document.getElementById('wizardTitle').textContent = `${noCode ? '上傳報價單' : (customer.mapping ? '匯出報價單' : '上傳報價單')} － ${customer.code} ${customer.name || ''}`;
-  document.getElementById('wizardSub').textContent = noCode
-    ? '上傳後會先儲存比對結果，不會立即產生檔案；之後可在客戶列表勾選多位客戶，用「批次匯出」合併成一份檔案'
-    : (customer.mapping ? '此客戶已設定欄位對應範本，上傳後將自動套用並匯出' : '首次上傳此客戶的報價單，需要設定欄位對應（之後可自動套用）');
+  document.getElementById('wizardTitle').textContent = `上傳報價單 － ${customer.code} ${customer.name || ''}`;
+  document.getElementById('wizardSub').textContent = customer.mapping
+    ? '此客戶已設定欄位對應範本，上傳後將自動套用並儲存；之後可在客戶列表勾選多位客戶，用「批次匯出」合併成一份檔案'
+    : '首次上傳此客戶的報價單，需要設定欄位對應（之後可自動套用）；上傳後會先儲存，不會立即產生檔案';
   document.getElementById('wizFileInput').value = '';
   document.getElementById('wizSaveMapping').checked = true;
   goToWizStep(1);
@@ -1583,7 +1678,7 @@ function goToWizStep(n) {
   const exportBtn = document.getElementById('wizExport');
   exportBtn.style.display = n === 3 ? 'inline-flex' : 'none';
   if (n === 3) {
-    exportBtn.textContent = state.wizard.customer.productCodeMode === '無貨號' ? '儲存報價' : '匯出並標記已匯出';
+    exportBtn.textContent = '儲存報價';
   }
 }
 
@@ -1829,46 +1924,17 @@ document.getElementById('wizExport').addEventListener('click', async () => {
   const { customer, convertedRecords } = state.wizard;
   if (!convertedRecords.length) return;
 
-  // 無貨號客戶：不立即產生檔案，先把比對結果存起來，之後用「批次匯出」合併多個客戶成一份檔案
-  if (customer.productCodeMode === '無貨號') {
-    setLoading(true, '儲存報價中…');
-    try {
-      const res = await saveQuotedPrices(customer, convertedRecords);
-      if (!res.ok) throw new Error(res.error || '儲存失敗');
-      upsertCustomer(res.customer);
-      closeModal('ovWizard');
-      toast('ok', `已儲存 ${customer.code} 的報價，共 ${convertedRecords.length} 項。之後可在客戶列表勾選需要的客戶，點「批次匯出」合併匯出。`);
-    } catch (err) {
-      toast('err', '儲存失敗：' + err.message);
-    } finally {
-      setLoading(false);
-    }
-    return;
-  }
-
-  setLoading(true, '準備匯出元件…');
-  let outName;
+  // 上傳報價單不再立即產生檔案，先把結果存起來，之後用「批次匯出」把選取的客戶合併成一份檔案
+  setLoading(true, '儲存報價中…');
   try {
-    await ensureExcelJS();
-    setLoading(true, '產生匯出檔案…');
-    outName = await exportWorkbook(customer, convertedRecords);
-  } catch (err) {
-    setLoading(false);
-    toast('err', '產生匯出檔案失敗：' + err.message);
-    return;
-  }
-  setLoading(true, '更新匯出狀態…');
-  try {
-    const res = await persistExportResult(customer, convertedRecords, outName);
-    if (!res.ok) throw new Error(res.error || '更新狀態失敗');
+    const saveFn = customer.productCodeMode === '無貨號' ? saveQuotedPrices : saveHasCodeRecords;
+    const res = await saveFn(customer, convertedRecords);
+    if (!res.ok) throw new Error(res.error || '儲存失敗');
     upsertCustomer(res.customer);
     closeModal('ovWizard');
-    toast('ok', `已匯出 ${customer.code}，共 ${convertedRecords.length} 項，並標示為已匯出`);
+    toast('ok', `已儲存 ${customer.code} 的報價，共 ${convertedRecords.length} 項。之後可在客戶列表勾選需要的客戶，點「批次匯出」合併匯出。`);
   } catch (err) {
-    // 檔案已經下載成功，只是這次狀態更新失敗（Supabase 走標準 REST API，這種情況比過去用
-    // Google Apps Script/JSONP 時少見很多，但仍保留一次背景重新整理當保險）。
-    loadCustomers(false);
-    toast('err', `檔案已下載，但狀態更新失敗，已重新整理最新狀態，請確認表格是否正確（${err.message}）`);
+    toast('err', '儲存失敗：' + err.message);
   } finally {
     setLoading(false);
   }
