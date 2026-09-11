@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-13-supabase-v10';
+const FRONTEND_VERSION = '2026-09-14-supabase-v11';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -124,7 +124,7 @@ let state = {
 /* ---------------- 資料列轉換：Supabase 的 snake_case 欄位 → 前端慣用的 camelCase ---------------- */
 // 客戶清單查詢共用的欄位（不含 last_item_codes/item_code_lookup/quoted_prices 這幾個可能較大的欄位，
 // 那些只有真的要用時才單獨查，見 fetchPreviousCodes／fetchItemCodeLookup／fetchQuotedPrices）
-const CUSTOMER_SELECT_COLS = 'code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count,quoted_prices_count,last_quote_upload_time,saved_records_count';
+const CUSTOMER_SELECT_COLS = 'code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count,quoted_prices_count,last_quote_upload_time,saved_records_count,notes,unit_category';
 
 function rowToCustomer(row) {
   return {
@@ -141,7 +141,9 @@ function rowToCustomer(row) {
     itemCodeLookupCount: row.item_code_lookup_count || 0,
     quotedPricesCount: row.quoted_prices_count || 0,
     lastQuoteUploadTime: row.last_quote_upload_time || '',
-    savedRecordsCount: row.saved_records_count || 0
+    savedRecordsCount: row.saved_records_count || 0,
+    notes: row.notes || '',
+    unitCategory: row.unit_category || ''
   };
 }
 
@@ -789,6 +791,7 @@ function renderTable() {
     const checked = isSelected ? 'checked' : '';
     const rowCls = isSelected ? ' class="row-selected"' : '';
     const checkboxCell = `<td class="selcol"><input type="checkbox" class="rowCheckbox" data-code="${escapeHtml(c.code)}" ${checked}></td>`;
+    const nameCell = `<td>${escapeHtml(c.name)}${c.notes ? `<span class="customer-note" title="${escapeHtml(c.notes)}">${escapeHtml(c.notes)}</span>` : ''}</td>`;
     const textLinks = `
         <button class="text-link" data-act="history" data-code="${escapeHtml(c.code)}">查看紀錄</button>
         <button class="text-link" data-act="edit" data-code="${escapeHtml(c.code)}">編輯</button>
@@ -805,11 +808,12 @@ function renderTable() {
         ? `<button class="btn small ${quotedCount > 0 ? 'btn-secondary' : 'btn-upload'}" data-act="upload" data-code="${escapeHtml(c.code)}">${quotedCount > 0 ? '重新上傳報價單' : '上傳報價單'}</button>`
         : `<button class="btn small btn-upload" data-act="upload" data-code="${escapeHtml(c.code)}">上傳報價單</button>`;
       const quotedHint = quotedCount > 0 ? `<span class="hint" style="margin-right:14px;">已儲存 ${quotedCount} 筆待匯出</span>` : '';
+      const cycleCell = `${escapeHtml(c.quoteCycle)}${c.unitCategory ? `<div class="hint" style="margin-top:3px;">${escapeHtml(c.unitCategory)}</div>` : ''}`;
       return `<tr${rowCls}>
         ${checkboxCell}
         <td class="code">${escapeHtml(c.code)}</td>
-        <td>${escapeHtml(c.name)}</td>
-        <td class="mono" style="font-size:12.5px;">${escapeHtml(c.quoteCycle)}</td>
+        ${nameCell}
+        <td class="mono" style="font-size:12.5px;">${cycleCell}</td>
         <td>${lookupBadge}</td>
         <td>${mapBadge}</td>
         <td>${expBadge}</td>
@@ -824,7 +828,7 @@ function renderTable() {
     return `<tr${rowCls}>
       ${checkboxCell}
       <td class="code">${escapeHtml(c.code)}</td>
-      <td>${escapeHtml(c.name)}</td>
+      ${nameCell}
       <td class="mono" style="font-size:12.5px;">${escapeHtml(c.quoteCycle)}</td>
       <td>${mapBadge}</td>
       <td>${expBadge}</td>
@@ -1123,6 +1127,7 @@ function openHistoryModal(customer) {
   const rows = [
     ['客戶代號', customer.code],
     ['客戶名稱', customer.name || '—'],
+    ['備註', customer.notes || '—'],
     ['報價種類', customer.productCodeMode],
     ['報價週期', customer.quoteCycle],
     ['匯出格式', customer.mapping ? '已設定' : '尚未設定'],
@@ -1133,7 +1138,8 @@ function openHistoryModal(customer) {
     ['到期日', info.due ? formatDateShort(info.due) : '—']
   ];
   if (customer.productCodeMode === '無貨號') {
-    rows.splice(4, 0,
+    rows.splice(5, 0,
+      ['單位分類', customer.unitCategory || '未設定'],
       ['料號對照表', customer.itemCodeLookupCount ? `已設定（${customer.itemCodeLookupCount} 筆）` : '尚未設定'],
       ['已儲存報價（待批次匯出）', customer.quotedPricesCount ? `${customer.quotedPricesCount} 筆` : '尚未上傳'],
       ['最後上傳報價時間', customer.lastQuoteUploadTime || '—']
@@ -1355,8 +1361,17 @@ function openCustomerModal(customer) {
   setVal('custProductCodeMode', customer ? customer.productCodeMode : '有貨號');
   setVal('custQuoteCycle', customer ? customer.quoteCycle : '7天');
   setVal('custExportStatus', customer ? (customer.exportStatus === '已匯出' ? '已匯出' : '未匯出') : '未匯出');
+  setVal('custUnitCategory', customer ? (customer.unitCategory || '') : '');
+  setVal('custNotes', customer ? (customer.notes || '') : '');
+  toggleUnitCategoryField();
   openModal('ovCustomer');
 }
+function toggleUnitCategoryField() {
+  const modeSel = document.getElementById('custProductCodeMode');
+  const field = document.getElementById('custUnitCategoryField');
+  if (modeSel && field) field.style.display = modeSel.value === '無貨號' ? 'block' : 'none';
+}
+document.getElementById('custProductCodeMode').addEventListener('change', toggleUnitCategoryField);
 document.getElementById('btnAddCustomer').addEventListener('click', () => openCustomerModal(null));
 
 // 新增/編輯客戶寫入邏輯：只有「匯出狀態」真的有變動時才動到 last_export_time，
@@ -1373,6 +1388,8 @@ async function saveCustomerToBackend(payload) {
     name: payload.name || '',
     product_code_mode: payload.productCodeMode === '無貨號' ? '無貨號' : '有貨號',
     quote_cycle: ['7天', '10天', '15天', '30天'].includes(payload.quoteCycle) ? payload.quoteCycle : '7天',
+    unit_category: ['kg', '台斤'].includes(payload.unitCategory) ? payload.unitCategory : '',
+    notes: payload.notes || '',
     updated_at: nowIso
   };
   if (!existing) {
@@ -1402,7 +1419,9 @@ document.getElementById('btnSaveCustomer').addEventListener('click', async () =>
       code, name,
       productCodeMode: document.getElementById('custProductCodeMode').value,
       quoteCycle: document.getElementById('custQuoteCycle').value,
-      exportStatus: document.getElementById('custExportStatus').value
+      exportStatus: document.getElementById('custExportStatus').value,
+      unitCategory: document.getElementById('custUnitCategory').value,
+      notes: document.getElementById('custNotes').value.trim()
     });
     upsertCustomer(customer);
     closeModal('ovCustomer');
