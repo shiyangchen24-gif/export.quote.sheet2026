@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-11-supabase-v8';
+const FRONTEND_VERSION = '2026-09-12-supabase-v9';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -122,6 +122,10 @@ let state = {
 };
 
 /* ---------------- 資料列轉換：Supabase 的 snake_case 欄位 → 前端慣用的 camelCase ---------------- */
+// 客戶清單查詢共用的欄位（不含 last_item_codes/item_code_lookup/quoted_prices 這幾個可能較大的欄位，
+// 那些只有真的要用時才單獨查，見 fetchPreviousCodes／fetchItemCodeLookup／fetchQuotedPrices）
+const CUSTOMER_SELECT_COLS = 'code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count,quoted_prices_count,last_quote_upload_time';
+
 function rowToCustomer(row) {
   return {
     code: row.code,
@@ -134,7 +138,9 @@ function rowToCustomer(row) {
     mapping: row.mapping || null,
     productCodeMode: row.product_code_mode || '有貨號',
     lastExportItemCount: row.last_export_item_count || 0,
-    itemCodeLookupCount: row.item_code_lookup_count || 0
+    itemCodeLookupCount: row.item_code_lookup_count || 0,
+    quotedPricesCount: row.quoted_prices_count || 0,
+    lastQuoteUploadTime: row.last_quote_upload_time || ''
   };
 }
 
@@ -143,12 +149,9 @@ async function loadCustomers(showLoading) {
   if (showLoading) setLoading(true, '載入客戶資料…');
   try {
     assertSb();
-    // last_item_codes／item_code_lookup 故意不列在這裡：這兩個欄位只有匯出/比對當下才需要，
-    // 客戶數一多、每次輪詢都帶著全部客戶的完整清單會浪費頻寬，改成用到才單獨查
-    // （見 fetchPreviousCodes／fetchItemCodeLookup）。item_code_lookup_count 只是筆數，很輕量，直接帶著沒關係。
     const { data, error } = await sb
       .from('customers')
-      .select('code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count')
+      .select(CUSTOMER_SELECT_COLS)
       .order('code');
     if (error) throw new Error(error.message);
     state.customers = (data || []).map(rowToCustomer);
@@ -299,9 +302,41 @@ async function saveItemCodeLookup(code, lookupArray) {
   assertSb();
   const { data, error } = await sb.from('customers').update({
     item_code_lookup: lookupArray, updated_at: new Date().toISOString()
-  }).eq('code', code).select('code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count').single();
+  }).eq('code', code).select(CUSTOMER_SELECT_COLS).single();
   if (error) throw new Error(error.message);
   return rowToCustomer(data);
+}
+
+/* ---------------- 無貨號客戶：報價先儲存，之後批次匯出 ---------------- */
+async function fetchQuotedPrices(code) {
+  try {
+    assertSb();
+    const { data, error } = await sb.from('customers').select('quoted_prices').eq('code', code).maybeSingle();
+    if (error || !data || !data.quoted_prices) return { matched: [], unmatched: [] };
+    return {
+      matched: Array.isArray(data.quoted_prices.matched) ? data.quoted_prices.matched : [],
+      unmatched: Array.isArray(data.quoted_prices.unmatched) ? data.quoted_prices.unmatched : []
+    };
+  } catch (err) { return { matched: [], unmatched: [] }; }
+}
+// 「上傳報價單」比對完成後不立即產生檔案，先把結果存起來，之後用「批次匯出」一次把選取的
+// 客戶合併成一份多欄檔案。這裡同時把 last_item_codes 更新好，下次上傳才能正確比對新增品項。
+async function saveQuotedPrices(customer, records) {
+  assertSb();
+  const identityField = getIdentityField(customer.productCodeMode);
+  const matched = records.filter(r => !r._unmatched).map(r => ({ code: r['貨號'], price: toNumberIfPossible(r['單價']), isNew: r._isNew }));
+  const unmatched = records.filter(r => r._unmatched).map(r => ({ name: r['品名'], unit: r['單位'] || '', price: toNumberIfPossible(r['單價']) }));
+  const codes = records.map(r => getDiffKey(r, customer.productCodeMode)).filter(Boolean);
+  const nowIso = new Date().toISOString();
+  const { data, error } = await sb.from('customers').update({
+    quoted_prices: { matched, unmatched },
+    last_item_codes: codes,
+    last_quote_upload_time: nowIso,
+    last_export_item_count: records.length,
+    updated_at: nowIso
+  }).eq('code', customer.code).select(CUSTOMER_SELECT_COLS).single();
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, customer: rowToCustomer(data) };
 }
 
 /* ---------------- 忠欣品項主檔（全公司共用） ---------------- */
@@ -450,11 +485,12 @@ async function exportWorkbook(customer, records) {
   return outName;
 }
 
-// 無貨號客戶的匯出格式跟有貨號客戶完全不同：輸出的是整份忠欣品項主檔（固定筆數、固定順序），
-// 客戶這次報價單比對到的單價填進對應料號那一列的 D 欄；沒被這個客戶報價的品項，D 欄就留空。
+// 無貨號客戶的匯出：可以把「多個客戶」合併成一份檔案——A-E 欄是共用的忠欣品項主檔（固定筆數、固定順序），
+// 每個客戶各自佔一欄（F、G、H...），該客戶這次報價比對到的單價填進對應品項那一列；沒被報價的品項留空。
 // 比對不到料號的品項（customer 打的名稱在料號對照表裡找不到）沒有主檔列可以對應，
-// 額外附加在整份主檔之後，一樣秉持「不會被默默漏掉」的原則。
-async function exportNoCodeWorkbook(customer, records, masterItems) {
+// 依客戶分段附加在整份主檔之後，一樣秉持「不會被默默漏掉」的原則。
+// customersWithData: [{ customer, matched:[{code,price,isNew}], unmatched:[{name,unit,price}] }, ...]
+async function exportNoCodeBatchWorkbook(customersWithData, masterItems) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('多客戶報價單格式');
   const FONT_NAME = '微軟正黑體';
@@ -468,81 +504,100 @@ async function exportNoCodeWorkbook(customer, records, masterItems) {
   const ALIGN_L = { horizontal: 'left', vertical: 'center' };
   const ALIGN_R = { horizontal: 'right', vertical: 'center' };
   const PRICE_FMT = '#,##0_);[Red](#,##0)';
+  const N = customersWithData.length;
 
-  ws.columns = [{ width: 24 }, { width: 31 }, { width: 11 }, { width: 10 }, { width: 14 }, { width: 18 }];
+  ws.columns = [{ width: 24 }, { width: 31 }, { width: 11 }, { width: 10 }, { width: 14 }]
+    .concat(customersWithData.map(() => ({ width: 18 })));
 
-  // 比對到的價格，用忠欣品項代號當 key；同時記錄這次是不是「新增」（上次沒報過這個代號）
-  const priceByCode = new Map();
-  records.forEach(rec => {
-    if (rec._unmatched) return;
-    priceByCode.set(rec['貨號'], { price: toNumberIfPossible(rec['單價']), isNew: rec._isNew });
+  // 每個客戶各自的「品項代號 → 比對結果」，之後逐列查比 O(1)
+  const priceMaps = customersWithData.map(cw => {
+    const m = new Map();
+    (cw.matched || []).forEach(x => m.set(x.code, x));
+    return m;
   });
-  const unmatchedRecs = records.filter(r => r._unmatched);
 
-  // 第1列：對象識別固定為 1（個別客戶報價，非群組報價）
-  const row1 = ws.addRow(['對象識別', '', '', '', '', 1]);
-  row1.eachCell({ includeEmpty: true }, cell => { cell.font = FONT_NORMAL; cell.alignment = ALIGN_L; cell.border = { top: THIN, bottom: THIN }; });
-  row1.getCell(6).numFmt = '_-* #,##0_-;-* #,##0_-;_-* "-"??_-;_-@_-';
+  // 第1列：對象識別，每個客戶欄都固定填 1
+  const row1 = ws.addRow(['對象識別', '', '', '', ''].concat(customersWithData.map(() => 1)));
+  row1.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    cell.font = FONT_NORMAL;
+    cell.alignment = ALIGN_L;
+    if (colNumber === 1 || colNumber > 5) cell.border = { top: THIN, bottom: THIN };
+  });
+  for (let i = 0; i < N; i++) row1.getCell(6 + i).numFmt = '_-* #,##0_-;-* #,##0_-;_-* "-"??_-;_-@_-';
 
-  // 第2列：客戶代號填入 F 欄
-  const row2 = ws.addRow(['客戶代號/報價群組代號', '', '', '', '', customer.code]);
+  // 第2列：每個客戶欄填自己的客戶代號
+  const row2 = ws.addRow(['客戶代號/報價群組代號', '', '', '', ''].concat(customersWithData.map(cw => cw.customer.code)));
   row2.getCell(1).font = FONT_NORMAL; row2.getCell(1).alignment = ALIGN_L; row2.getCell(1).border = { bottom: THIN };
-  const f2 = row2.getCell(6);
-  f2.font = FONT_NORMAL; f2.alignment = ALIGN_L; f2.border = { top: THIN, bottom: THIN }; f2.numFmt = '@';
+  for (let i = 0; i < N; i++) {
+    const cell = row2.getCell(6 + i);
+    cell.font = FONT_NORMAL; cell.alignment = ALIGN_L; cell.border = { top: THIN, bottom: THIN }; cell.numFmt = '@';
+  }
 
-  // 第3列：欄位標題（品項代號/品項名稱/規格代號/規格/等級），客戶名稱填入 F 欄；E 欄右側細框線是後面所有列的分隔線
-  const row3 = ws.addRow(['品項代號', '品項名稱', '規格代號', '規格', '等級', customer.name || '']);
+  // 第3列：欄位標題，每個客戶欄填自己的客戶名稱；E 欄右側細框線是後面所有列的分隔線
+  const row3 = ws.addRow(['品項代號', '品項名稱', '規格代號', '規格', '等級'].concat(customersWithData.map(cw => cw.customer.name || '')));
   row3.eachCell({ includeEmpty: true }, (cell, colNumber) => {
     cell.font = FONT_NORMAL;
     cell.alignment = ALIGN_L;
     cell.border = colNumber === 5 ? { top: THIN, bottom: THIN, right: THIN } : { top: THIN, bottom: THIN };
   });
-  row3.getCell(6).numFmt = '@';
+  for (let i = 0; i < N; i++) row3.getCell(6 + i).numFmt = '@';
 
-  // 第4列起：忠欣品項主檔全部列出，比對到的單價填入 F 欄；E 欄右側細框線貫穿整張表
+  // 第4列起：忠欣品項主檔全部列出，每個客戶欄各自填自己比對到的單價；E 欄右側細框線貫穿整張表
   const rowValues = masterItems.map(item => {
-    const match = priceByCode.get(item.itemCode);
-    return [item.itemCode, item.itemName, item.specCode || '', item.unit, item.grade || '', match ? match.price : null];
+    const base = [item.itemCode, item.itemName, item.specCode || '', item.unit, item.grade || ''];
+    const prices = priceMaps.map(m => { const match = m.get(item.itemCode); return match ? match.price : null; });
+    return base.concat(prices);
   });
   const addedRows = ws.addRows(rowValues);
   addedRows.forEach((row, i) => {
     const item = masterItems[i];
-    const match = priceByCode.get(item.itemCode);
-    const isNew = !!(match && match.isNew);
-    const font = isNew ? FONT_NEW : FONT_NORMAL;
-    row.getCell(1).alignment = ALIGN_R;
-    row.getCell(3).numFmt = '@';
-    row.getCell(6).numFmt = PRICE_FMT;
-    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      cell.font = font;
-      if (colNumber !== 1 && colNumber !== 6) cell.alignment = ALIGN_L;
-      if (colNumber === 6) cell.alignment = ALIGN_R;
-      if (colNumber === 5) cell.border = { right: THIN };
+    row.getCell(1).font = FONT_NORMAL; row.getCell(1).alignment = ALIGN_R;
+    row.getCell(2).font = FONT_NORMAL; row.getCell(2).alignment = ALIGN_L;
+    row.getCell(3).font = FONT_NORMAL; row.getCell(3).alignment = ALIGN_L; row.getCell(3).numFmt = '@';
+    row.getCell(4).font = FONT_NORMAL; row.getCell(4).alignment = ALIGN_L;
+    row.getCell(5).font = FONT_NORMAL; row.getCell(5).alignment = ALIGN_L; row.getCell(5).border = { right: THIN };
+    for (let ci = 0; ci < N; ci++) {
+      const match = priceMaps[ci].get(item.itemCode);
+      const isNew = !!(match && match.isNew);
+      const cell = row.getCell(6 + ci);
+      cell.numFmt = PRICE_FMT;
+      cell.font = isNew ? FONT_NEW : FONT_NORMAL;
+      cell.alignment = ALIGN_R;
       if (isNew) cell.fill = FILL_NEW;
-    });
+    }
   });
 
-  // 比對不到料號的品項：主檔沒有對應列可以填，附加在最後，橘底標示提醒需要補上料號對照表
-  if (unmatchedRecs.length) {
-    const noteRow = ws.addRow(['', `— 以下 ${unmatchedRecs.length} 項客戶有報價，但在料號對照表找不到對應的忠欣品項代號，請確認 —`, '', '', '', '']);
+  // 比對不到料號的品項：主檔沒有對應列可以填，依客戶分段附加在最後，橘底標示提醒需要補上料號對照表
+  customersWithData.forEach((cw, ci) => {
+    const unmatched = cw.unmatched || [];
+    if (!unmatched.length) return;
+    const noteVals = ['', `— ${cw.customer.code} ${cw.customer.name || ''} 以下 ${unmatched.length} 項比對不到忠欣品項代號，請確認 —`, '', '', '']
+      .concat(customersWithData.map(() => ''));
+    const noteRow = ws.addRow(noteVals);
     noteRow.eachCell({ includeEmpty: true }, cell => { cell.font = { name: FONT_NAME, size: FONT_SIZE, italic: true, color: { argb: 'FFB35400' } }; });
-    const unmatchedRows = unmatchedRecs.map(rec => ['', rec['品名'] || '', '', rec['單位'] || '', '', toNumberIfPossible(rec['單價'])]);
-    const addedUnmatchedRows = ws.addRows(unmatchedRows);
-    addedUnmatchedRows.forEach(row => {
-      row.getCell(6).numFmt = PRICE_FMT;
+    const rows = unmatched.map(u => {
+      const base = ['', u.name || '', '', u.unit || '', ''];
+      const prices = customersWithData.map((_, j) => j === ci ? toNumberIfPossible(u.price) : null);
+      return base.concat(prices);
+    });
+    const added = ws.addRows(rows);
+    added.forEach(row => {
+      row.getCell(6 + ci).numFmt = PRICE_FMT;
       row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
         cell.font = FONT_UNMATCHED;
-        cell.alignment = colNumber === 6 ? ALIGN_R : ALIGN_L;
+        cell.alignment = colNumber === (6 + ci) ? ALIGN_R : ALIGN_L;
         if (colNumber === 5) cell.border = { right: THIN };
         cell.fill = FILL_UNMATCHED;
       });
     });
-  }
+  });
 
   const buf = await wb.xlsx.writeBuffer();
   const today = new Date();
   const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
-  const outName = `${customer.code}_${customer.name || ''}_報價單匯入_${stamp}.xlsx`;
+  const outName = N === 1
+    ? `${customersWithData[0].customer.code}_${customersWithData[0].customer.name || ''}_報價單匯入_${stamp}.xlsx`
+    : `多客戶報價單_${N}家_${stamp}.xlsx`;
   saveAs(new Blob([buf], { type: 'application/octet-stream' }), outName);
   return outName;
 }
@@ -616,7 +671,7 @@ function renderTableHead() {
       <th style="width:110px;">料號對照表</th>
       <th style="width:100px;">匯出格式</th>
       <th style="width:150px;">匯出狀態</th>
-      <th style="width:580px;">操作</th>
+      <th style="width:680px;">操作</th>
       <th></th>
     </tr>`;
   } else {
@@ -670,6 +725,11 @@ function renderTable() {
       const lookupBadge = lookupCount > 0
         ? `<span class="badge badge-green">已設定</span><div class="hint" style="margin-top:3px;">${lookupCount} 筆</div>`
         : `<span class="badge badge-red">尚未設定</span>`;
+      const quotedCount = c.quotedPricesCount || 0;
+      const noCodeActionBtn = mapSet
+        ? `<button class="btn small ${quotedCount > 0 ? 'btn-secondary' : 'btn-upload'}" data-act="upload" data-code="${escapeHtml(c.code)}">${quotedCount > 0 ? '重新上傳報價單' : '上傳報價單'}</button>`
+        : `<button class="btn small btn-upload" data-act="upload" data-code="${escapeHtml(c.code)}">上傳報價單</button>`;
+      const quotedHint = quotedCount > 0 ? `<span class="hint" style="margin-right:14px;">已儲存 ${quotedCount} 筆待匯出</span>` : '';
       return `<tr${rowCls}>
         ${checkboxCell}
         <td class="code">${escapeHtml(c.code)}</td>
@@ -679,7 +739,7 @@ function renderTable() {
         <td>${mapBadge}</td>
         <td>${expBadge}</td>
         <td class="actions">
-          ${actionBtn}
+          ${noCodeActionBtn}${quotedHint}
           <button class="text-link" data-act="lookup" data-code="${escapeHtml(c.code)}">上傳料號對照表</button>
           ${textLinks}
         </td>
@@ -712,6 +772,7 @@ document.getElementById('tabRow').addEventListener('click', e => {
   state.activeTab = tab;
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
   document.getElementById('masterItemsPanel').style.display = tab === 'noCode' ? 'flex' : 'none';
+  document.getElementById('btnBatchExportNoCode').style.display = tab === 'noCode' ? 'inline-flex' : 'none';
   // 統計卡篩選跟表頭欄位篩選都是「頁籤內」的概念，切頁籤時重置，避免帶著上個頁籤的篩選條件卻找不到東西
   state.statFilter = 'all';
   state.cycleFilter = 'all';
@@ -827,10 +888,13 @@ function updateBulkButtonsState() {
   const n = state.selectedCodes.size;
   const editBtn = document.getElementById('btnBatchEdit');
   const delBtn = document.getElementById('btnBatchDelete');
+  const exportBtn = document.getElementById('btnBatchExportNoCode');
   editBtn.disabled = n === 0;
   delBtn.disabled = n === 0;
+  exportBtn.disabled = n === 0;
   editBtn.textContent = n ? `批次修改 (${n})` : '批次修改';
   delBtn.textContent = n ? `批次刪除 (${n})` : '批次刪除';
+  exportBtn.textContent = n ? `批次匯出 (${n})` : '批次匯出';
 }
 function syncSelectAllCheckbox() {
   const selectAll = document.getElementById('selectAllCheckbox');
@@ -866,6 +930,47 @@ document.getElementById('btnBatchDelete').addEventListener('click', async () => 
     toast('ok', `已刪除 ${codes.length} 筆客戶`);
   } catch (err) { toast('err', err.message); }
   finally { setLoading(false); }
+});
+
+/* ---------------- 批次匯出（無貨號客戶：合併成一份多欄檔案） ---------------- */
+document.getElementById('btnBatchExportNoCode').addEventListener('click', async () => {
+  const codes = Array.from(state.selectedCodes);
+  if (!codes.length) return;
+  const selectedCustomers = codes.map(code => state.customers.find(c => c.code === code)).filter(Boolean);
+  const ready = selectedCustomers.filter(c => (c.quotedPricesCount || 0) > 0);
+  const notReady = selectedCustomers.filter(c => !(c.quotedPricesCount > 0));
+  if (!ready.length) { toast('err', '選取的客戶都還沒有「上傳報價單」儲存過資料，沒有東西可以匯出'); return; }
+  if (notReady.length && !confirm(`選取的 ${selectedCustomers.length} 筆客戶中，有 ${notReady.length} 筆還沒上傳過報價單（${notReady.map(c => c.code).join('、')}），會被跳過不列入這次匯出。要繼續嗎？`)) return;
+
+  setLoading(true, '準備匯出元件…');
+  try {
+    await ensureExcelJS();
+    if (!state.masterItems.length) await loadMasterItems();
+    setLoading(true, `讀取已儲存的報價資料…（${ready.length} 家客戶）`);
+    const customersWithData = [];
+    for (const c of ready) {
+      const prices = await fetchQuotedPrices(c.code);
+      customersWithData.push({ customer: c, matched: prices.matched, unmatched: prices.unmatched });
+    }
+    setLoading(true, '產生合併匯出檔案…');
+    const outName = await exportNoCodeBatchWorkbook(customersWithData, state.masterItems);
+
+    setLoading(true, '更新匯出狀態…');
+    const nowIso = new Date().toISOString();
+    const readyCodes = ready.map(c => c.code);
+    const { data, error } = await sb.from('customers').update({
+      export_status: '已匯出', last_export_time: nowIso, last_export_filename: outName, updated_at: nowIso
+    }).in('code', readyCodes).select(CUSTOMER_SELECT_COLS);
+    if (error) throw new Error(error.message);
+    (data || []).forEach(row => upsertCustomer(rowToCustomer(row)));
+    state.selectedCodes.clear();
+    renderTable(); updateBulkButtonsState();
+    toast('ok', `已匯出 ${ready.length} 家客戶的合併報價單`);
+  } catch (err) {
+    toast('err', '批次匯出失敗：' + err.message);
+  } finally {
+    setLoading(false);
+  }
 });
 
 /* ---------------- 批次修改 ---------------- */
@@ -908,7 +1013,7 @@ document.getElementById('btnConfirmBatchEdit').addEventListener('click', async (
   try {
     assertSb();
     const { data, error } = await sb.from('customers').update(patch).in('code', codes)
-      .select('code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count');
+      .select(CUSTOMER_SELECT_COLS);
     if (error) throw new Error(error.message);
     (data || []).forEach(row => upsertCustomer(rowToCustomer(row)));
     closeModal('ovBatchEdit');
@@ -933,7 +1038,11 @@ function openHistoryModal(customer) {
     ['到期日', info.due ? formatDateShort(info.due) : '—']
   ];
   if (customer.productCodeMode === '無貨號') {
-    rows.splice(4, 0, ['料號對照表', customer.itemCodeLookupCount ? `已設定（${customer.itemCodeLookupCount} 筆）` : '尚未設定']);
+    rows.splice(4, 0,
+      ['料號對照表', customer.itemCodeLookupCount ? `已設定（${customer.itemCodeLookupCount} 筆）` : '尚未設定'],
+      ['已儲存報價（待批次匯出）', customer.quotedPricesCount ? `${customer.quotedPricesCount} 筆` : '尚未上傳'],
+      ['最後上傳報價時間', customer.lastQuoteUploadTime || '—']
+    );
   }
   document.getElementById('historyTitle').textContent = `匯出紀錄－${customer.code} ${customer.name || ''}`;
   document.getElementById('historyTable').innerHTML = rows.map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join('');
@@ -1303,7 +1412,7 @@ document.getElementById('btnConfirmBatch').addEventListener('click', async () =>
         last_export_time: c.exportStatus === '已匯出' ? nowIso : null,
         updated_at: nowIso
       }));
-      const { data, error } = await sb.from('customers').upsert(payload, { onConflict: 'code' }).select('code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count');
+      const { data, error } = await sb.from('customers').upsert(payload, { onConflict: 'code' }).select(CUSTOMER_SELECT_COLS);
       if (error) throw new Error(error.message);
       allRows.push(...(data || []));
     }
@@ -1413,12 +1522,17 @@ document.getElementById('btnConfirmBatchQuotes').addEventListener('click', async
         if (noCode && !state.masterItems.length) await loadMasterItems();
         const records = buildConvertedRecords(rows, job.customer.mapping.dataStartRowIdx, job.customer.mapping.columnMap, job.customer.productCodeMode, previousCodes, itemCodeLookup, state.masterItems);
         if (!records.length) throw new Error('沒有解析到任何品項，請確認欄位對應是否仍然正確');
-        const outName = noCode
-          ? await exportNoCodeWorkbook(job.customer, records, state.masterItems)
-          : await exportWorkbook(job.customer, records);
-        const res = await persistExportResult(job.customer, records, outName);
-        if (!res.ok) throw new Error(res.error || '更新狀態失敗');
-        upsertCustomer(res.customer);
+        if (noCode) {
+          // 無貨號客戶不在這裡直接匯出檔案，先儲存比對結果，之後用「批次匯出」合併成一份檔案
+          const res = await saveQuotedPrices(job.customer, records);
+          if (!res.ok) throw new Error(res.error || '儲存失敗');
+          upsertCustomer(res.customer);
+        } else {
+          const outName = await exportWorkbook(job.customer, records);
+          const res = await persistExportResult(job.customer, records, outName);
+          if (!res.ok) throw new Error(res.error || '更新狀態失敗');
+          upsertCustomer(res.customer);
+        }
         okN++;
       } catch (err) {
         failN++;
@@ -1442,17 +1556,18 @@ function colLetter(i) {
 
 function openWizard(customer) {
   state.wizard = { customer, rawRows: null, dataStartRowIdx: null, columnMap: {}, numCols: 0, convertedRecords: [], step: 1, usingSaved: false, fileName: '', previousCodes: [], itemCodeLookup: [], isFirstEverExport: true };
-  document.getElementById('wizardTitle').textContent = `${customer.mapping ? '匯出報價單' : '上傳報價單'} － ${customer.code} ${customer.name || ''}`;
-  document.getElementById('wizardSub').textContent = customer.mapping
-    ? '此客戶已設定欄位對應範本，上傳後將自動套用並匯出'
-    : '首次上傳此客戶的報價單，需要設定欄位對應（之後可自動套用）';
+  const noCode = customer.productCodeMode === '無貨號';
+  document.getElementById('wizardTitle').textContent = `${noCode ? '上傳報價單' : (customer.mapping ? '匯出報價單' : '上傳報價單')} － ${customer.code} ${customer.name || ''}`;
+  document.getElementById('wizardSub').textContent = noCode
+    ? '上傳後會先儲存比對結果，不會立即產生檔案；之後可在客戶列表勾選多位客戶，用「批次匯出」合併成一份檔案'
+    : (customer.mapping ? '此客戶已設定欄位對應範本，上傳後將自動套用並匯出' : '首次上傳此客戶的報價單，需要設定欄位對應（之後可自動套用）');
   document.getElementById('wizFileInput').value = '';
   document.getElementById('wizSaveMapping').checked = true;
   goToWizStep(1);
   openModal('ovWizard');
   ensureXLSX();
   ensureExcelJS();
-  if (customer.productCodeMode === '無貨號' && !state.masterItems.length) loadMasterItems();
+  if (noCode && !state.masterItems.length) loadMasterItems();
 }
 
 function goToWizStep(n) {
@@ -1465,7 +1580,11 @@ function goToWizStep(n) {
   });
   document.getElementById('wizBack').style.display = n > 1 ? 'inline-flex' : 'none';
   document.getElementById('wizNext').style.display = n < 3 ? 'inline-flex' : 'none';
-  document.getElementById('wizExport').style.display = n === 3 ? 'inline-flex' : 'none';
+  const exportBtn = document.getElementById('wizExport');
+  exportBtn.style.display = n === 3 ? 'inline-flex' : 'none';
+  if (n === 3) {
+    exportBtn.textContent = state.wizard.customer.productCodeMode === '無貨號' ? '儲存報價' : '匯出並標記已匯出';
+  }
 }
 
 setupDropzone('wizDropzone', 'wizFileInput', async file => {
@@ -1709,17 +1828,30 @@ async function saveMappingForCustomer() {
 document.getElementById('wizExport').addEventListener('click', async () => {
   const { customer, convertedRecords } = state.wizard;
   if (!convertedRecords.length) return;
+
+  // 無貨號客戶：不立即產生檔案，先把比對結果存起來，之後用「批次匯出」合併多個客戶成一份檔案
+  if (customer.productCodeMode === '無貨號') {
+    setLoading(true, '儲存報價中…');
+    try {
+      const res = await saveQuotedPrices(customer, convertedRecords);
+      if (!res.ok) throw new Error(res.error || '儲存失敗');
+      upsertCustomer(res.customer);
+      closeModal('ovWizard');
+      toast('ok', `已儲存 ${customer.code} 的報價，共 ${convertedRecords.length} 項。之後可在客戶列表勾選需要的客戶，點「批次匯出」合併匯出。`);
+    } catch (err) {
+      toast('err', '儲存失敗：' + err.message);
+    } finally {
+      setLoading(false);
+    }
+    return;
+  }
+
   setLoading(true, '準備匯出元件…');
   let outName;
   try {
     await ensureExcelJS();
     setLoading(true, '產生匯出檔案…');
-    if (customer.productCodeMode === '無貨號') {
-      if (!state.masterItems.length) await loadMasterItems();
-      outName = await exportNoCodeWorkbook(customer, convertedRecords, state.masterItems);
-    } else {
-      outName = await exportWorkbook(customer, convertedRecords);
-    }
+    outName = await exportWorkbook(customer, convertedRecords);
   } catch (err) {
     setLoading(false);
     toast('err', '產生匯出檔案失敗：' + err.message);
