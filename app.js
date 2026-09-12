@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-15-supabase-v12';
+const FRONTEND_VERSION = '2026-09-16-supabase-v13';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -746,7 +746,7 @@ function renderTableHead() {
     thead.innerHTML = `<tr>
       ${selectAllTh}
       <th style="width:100px;">客戶代號</th>
-      <th style="width:200px;">客戶名稱</th>
+      <th style="width:260px;">客戶名稱</th>
       <th style="width:100px;">報價週期 ${cycleFilterBtn}</th>
       <th style="width:110px;">料號對照表</th>
       <th style="width:100px;">匯出格式</th>
@@ -758,7 +758,7 @@ function renderTableHead() {
     thead.innerHTML = `<tr>
       ${selectAllTh}
       <th style="width:100px;">客戶代號</th>
-      <th style="width:200px;">客戶名稱</th>
+      <th style="width:260px;">客戶名稱</th>
       <th style="width:100px;">報價週期 ${cycleFilterBtn}</th>
       <th style="width:100px;">匯出格式</th>
       <th style="width:150px;">匯出狀態</th>
@@ -796,8 +796,7 @@ function renderTable() {
     const checked = isSelected ? 'checked' : '';
     const rowCls = isSelected ? ' class="row-selected"' : '';
     const checkboxCell = `<td class="selcol"><input type="checkbox" class="rowCheckbox" data-code="${escapeHtml(c.code)}" ${checked}></td>`;
-    const nameCell = `<td class="cust-name">${escapeHtml(c.name)}</td>`;
-    const noteBadge = c.notes ? `<span class="customer-note" title="${escapeHtml(c.notes)}">備註 : ${escapeHtml(c.notes)}</span>` : '';
+    const nameCell = `<td class="cust-name">${escapeHtml(c.name)}${c.notes ? `<button class="customer-note" data-act="shownote" data-code="${escapeHtml(c.code)}" title="點擊查看完整備註">備註 : ${escapeHtml(c.notes)}</button>` : ''}</td>`;
     const textLinks = `
         <button class="text-link" data-act="history" data-code="${escapeHtml(c.code)}">查看紀錄</button>
         <button class="text-link" data-act="edit" data-code="${escapeHtml(c.code)}">編輯</button>
@@ -824,7 +823,7 @@ function renderTable() {
         <td>${mapBadge}</td>
         <td>${expBadge}</td>
         <td class="actions">
-          ${noteBadge}${noCodeActionBtn}${quotedHint}
+          ${noCodeActionBtn}${quotedHint}
           <button class="text-link" data-act="lookup" data-code="${escapeHtml(c.code)}">上傳料號對照表</button>
           ${textLinks}
         </td>
@@ -839,7 +838,7 @@ function renderTable() {
       <td>${mapBadge}</td>
       <td>${expBadge}</td>
       <td class="actions">
-        ${noteBadge}${actionBtn}${savedHint}
+        ${actionBtn}${savedHint}
         ${textLinks}
       </td>
       <td></td>
@@ -895,6 +894,7 @@ document.getElementById('custTbody').addEventListener('click', e => {
     else if (act === 'reconfigure') reconfigureMapping(customer);
     else if (act === 'delete') deleteCustomerSingle(customer);
     else if (act === 'lookup') openLookupWizard(customer);
+    else if (act === 'shownote') openNoteFullText(btn, customer.notes);
   } catch (err) {
     toast('err', '操作失敗，頁面可能不是最新版本，請重新整理或確認部署檔案是否為最新：' + err.message);
   }
@@ -1213,16 +1213,82 @@ document.getElementById('btnConfirmMasterItems').addEventListener('click', async
 /* ---------------- 客戶料號對照表：上傳（每個無貨號客戶各自一份） ---------------- */
 let lookupParsed = [];
 let lookupTargetCustomer = null;
-function openLookupWizard(customer) {
+let lookupExistingEntries = [];
+
+function populateMasterItemsDatalist() {
+  const dl = document.getElementById('masterItemsDatalist');
+  if (!dl) return;
+  dl.innerHTML = state.masterItems.map(m => `<option value="${escapeHtml(m.itemCode)}">${escapeHtml(m.itemCode)} － ${escapeHtml(m.itemName)}</option>`).join('');
+}
+
+function renderLookupExistingTable() {
+  document.getElementById('lookupExistingSummary').textContent = `目前已設定 ${lookupExistingEntries.length} 筆對照`;
+  const table = document.getElementById('lookupExistingTable');
+  if (!lookupExistingEntries.length) {
+    table.innerHTML = '<tbody><tr><td class="hint" style="padding:10px;">還沒有任何對照，請用上面的表單新增，或用下面整批上傳</td></tr></tbody>';
+    return;
+  }
+  table.innerHTML = '<thead><tr><th>客戶品項名稱</th><th>忠欣品項名稱</th><th>忠欣料號</th></tr></thead><tbody>' +
+    lookupExistingEntries.map(x => `<tr><td>${escapeHtml(x.name)}</td><td>${escapeHtml(x.itemName || '')}</td><td class="mono">${escapeHtml(x.code)}</td></tr>`).join('') +
+    '</tbody>';
+}
+
+async function openLookupWizard(customer) {
   lookupTargetCustomer = customer;
   lookupParsed = [];
-  document.getElementById('lookupTitle').textContent = `上傳料號對照表 － ${customer.code} ${customer.name || ''}`;
+  document.getElementById('lookupTitle').textContent = `料號對照表 － ${customer.code} ${customer.name || ''}`;
   document.getElementById('lookupPreviewWrap').style.display = 'none';
   document.getElementById('lookupFileInput').value = '';
   document.getElementById('btnConfirmLookup').disabled = true;
+  document.getElementById('newLookupCustName').value = '';
+  document.getElementById('newLookupItemCode').value = '';
+  document.getElementById('newLookupItemName').value = '';
   ensureXLSX();
   openModal('ovLookup');
+  setLoading(true, '載入現有對照與忠欣品項主檔…');
+  try {
+    if (!state.masterItems.length) await loadMasterItems();
+    populateMasterItemsDatalist();
+    lookupExistingEntries = await fetchItemCodeLookup(customer.code);
+    renderLookupExistingTable();
+  } finally {
+    setLoading(false);
+  }
 }
+
+// 忠欣料號打出來就自動在忠欣品項主檔查，找到就帶入官方品項名稱；找不到就清空提示
+document.getElementById('newLookupItemCode').addEventListener('input', e => {
+  const code = e.target.value.trim();
+  const match = state.masterItems.find(m => m.itemCode === code);
+  document.getElementById('newLookupItemName').value = match ? match.itemName : '';
+});
+
+document.getElementById('btnAddLookupEntry').addEventListener('click', async () => {
+  if (!lookupTargetCustomer) return;
+  const name = document.getElementById('newLookupCustName').value.trim();
+  const code = document.getElementById('newLookupItemCode').value.trim();
+  const match = state.masterItems.find(m => m.itemCode === code);
+  if (!name) { toast('err', '請輸入客戶品項名稱'); return; }
+  if (!code || !match) { toast('err', '忠欣料號找不到對應的品項，請確認輸入或從清單選擇'); return; }
+  setLoading(true, '新增對照中…');
+  try {
+    // 用「客戶品項名稱」當key：已存在就更新，否則新增一筆，不會動到其他既有對照
+    const idx = lookupExistingEntries.findIndex(x => x.name === name);
+    const entry = { name, code, itemName: match.itemName };
+    if (idx > -1) lookupExistingEntries[idx] = entry;
+    else lookupExistingEntries.push(entry);
+    const customer = await saveItemCodeLookup(lookupTargetCustomer.code, lookupExistingEntries);
+    upsertCustomer(customer);
+    lookupTargetCustomer = customer;
+    renderLookupExistingTable();
+    document.getElementById('newLookupCustName').value = '';
+    document.getElementById('newLookupItemCode').value = '';
+    document.getElementById('newLookupItemName').value = '';
+    toast('ok', `已新增「${name}」對照到 ${match.itemCode}`);
+  } catch (err) { toast('err', err.message); }
+  finally { setLoading(false); }
+});
+
 setupDropzone('lookupDropzone', 'lookupFileInput', async file => {
   try {
     const { rows } = await readWorkbookRaw(file);
@@ -1252,12 +1318,19 @@ setupDropzone('lookupDropzone', 'lookupFileInput', async file => {
 });
 document.getElementById('btnConfirmLookup').addEventListener('click', async () => {
   if (!lookupParsed.length || !lookupTargetCustomer) return;
+  if (!confirm(`確定要用這 ${lookupParsed.length} 筆整批取代 ${lookupTargetCustomer.code} 目前的料號對照表嗎？現有的對照會被覆蓋掉。`)) return;
   setLoading(true, '寫入料號對照表中…');
   try {
     const customer = await saveItemCodeLookup(lookupTargetCustomer.code, lookupParsed);
     upsertCustomer(customer);
-    closeModal('ovLookup');
-    toast('ok', `已更新 ${customer.code} 的料號對照表，共 ${lookupParsed.length} 筆`);
+    lookupTargetCustomer = customer;
+    lookupExistingEntries = lookupParsed;
+    renderLookupExistingTable();
+    lookupParsed = [];
+    document.getElementById('lookupPreviewWrap').style.display = 'none';
+    document.getElementById('lookupFileInput').value = '';
+    document.getElementById('btnConfirmLookup').disabled = true;
+    toast('ok', `已更新 ${customer.code} 的料號對照表，共 ${customer.itemCodeLookupCount || 0} 筆`);
   } catch (err) { toast('err', err.message); }
   finally { setLoading(false); }
 });
@@ -1337,6 +1410,27 @@ colFilterMenuEl.addEventListener('change', e => {
 document.addEventListener('click', e => {
   if (e.target.closest('#colFilterMenu') || e.target.closest('[data-filter-col]')) return;
   closeColFilterMenu();
+});
+
+// 備註全文彈出視窗：備註太長時，點擊徽章看完整內容（跟欄位篩選 popover 共用同一套定位邏輯）
+const noteFullTextEl = document.getElementById('noteFullTextPopover');
+function openNoteFullText(btn, text) {
+  noteFullTextEl.textContent = text || '';
+  noteFullTextEl.style.display = 'block';
+  const rect = btn.getBoundingClientRect();
+  const boxRect = noteFullTextEl.getBoundingClientRect();
+  let top = rect.bottom + 6;
+  if (top + boxRect.height > window.innerHeight) top = rect.top - boxRect.height - 6;
+  let left = rect.left;
+  if (left + boxRect.width > window.innerWidth - 8) left = window.innerWidth - boxRect.width - 8;
+  if (left < 8) left = 8;
+  noteFullTextEl.style.top = top + 'px';
+  noteFullTextEl.style.left = left + 'px';
+}
+function closeNoteFullText() { noteFullTextEl.style.display = 'none'; }
+document.addEventListener('click', e => {
+  if (e.target.closest('#noteFullTextPopover') || e.target.closest('[data-act="shownote"]')) return;
+  closeNoteFullText();
 });
 
 document.getElementById('btnResetAll').addEventListener('click', async () => {
