@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-14-supabase-v11';
+const FRONTEND_VERSION = '2026-09-15-supabase-v12';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -432,9 +432,14 @@ function buildConvertedRecords(rawRows, dataStartRowIdx, columnMap, productCodeM
     if (!rec[identityField]) continue;
     const priceWasZeroOrBlank = !rec['單價'] || !String(rec['單價']).trim() || String(rec['單價']).trim() === '0';
     if (!rec['單價'] || !String(rec['單價']).trim()) rec['單價'] = '0'; // 無單價自動補0
-    // 有貨號客戶：單價是 0 或空白時，若客戶自己沒填「不報價原因」，自動補「時價」
-    if (!noCode && priceWasZeroOrBlank && (!rec['不報價原因'] || !String(rec['不報價原因']).trim())) {
-      rec['不報價原因'] = '時價';
+    // 有貨號客戶：單價是 0 或空白時，若客戶自己沒填「不報價原因」，自動補「時價」；
+    // 反過來，只要有實際報價（單價不是 0），「不報價原因」一律清空，避免跟有報價的品項邏輯矛盾
+    if (!noCode) {
+      if (priceWasZeroOrBlank) {
+        if (!rec['不報價原因'] || !String(rec['不報價原因']).trim()) rec['不報價原因'] = '時價';
+      } else {
+        rec['不報價原因'] = '';
+      }
     }
     if (noCode) {
       const matchedCode = lookupMap.get(rec['品名']);
@@ -746,7 +751,7 @@ function renderTableHead() {
       <th style="width:110px;">料號對照表</th>
       <th style="width:100px;">匯出格式</th>
       <th style="width:150px;">匯出狀態</th>
-      <th style="width:680px;">操作</th>
+      <th style="width:760px;">操作</th>
       <th></th>
     </tr>`;
   } else {
@@ -757,7 +762,7 @@ function renderTableHead() {
       <th style="width:100px;">報價週期 ${cycleFilterBtn}</th>
       <th style="width:100px;">匯出格式</th>
       <th style="width:150px;">匯出狀態</th>
-      <th style="width:560px;">操作</th>
+      <th style="width:640px;">操作</th>
       <th></th>
     </tr>`;
   }
@@ -791,7 +796,8 @@ function renderTable() {
     const checked = isSelected ? 'checked' : '';
     const rowCls = isSelected ? ' class="row-selected"' : '';
     const checkboxCell = `<td class="selcol"><input type="checkbox" class="rowCheckbox" data-code="${escapeHtml(c.code)}" ${checked}></td>`;
-    const nameCell = `<td>${escapeHtml(c.name)}${c.notes ? `<span class="customer-note" title="${escapeHtml(c.notes)}">${escapeHtml(c.notes)}</span>` : ''}</td>`;
+    const nameCell = `<td class="cust-name">${escapeHtml(c.name)}</td>`;
+    const noteBadge = c.notes ? `<span class="customer-note" title="${escapeHtml(c.notes)}">備註 : ${escapeHtml(c.notes)}</span>` : '';
     const textLinks = `
         <button class="text-link" data-act="history" data-code="${escapeHtml(c.code)}">查看紀錄</button>
         <button class="text-link" data-act="edit" data-code="${escapeHtml(c.code)}">編輯</button>
@@ -818,7 +824,7 @@ function renderTable() {
         <td>${mapBadge}</td>
         <td>${expBadge}</td>
         <td class="actions">
-          ${noCodeActionBtn}${quotedHint}
+          ${noteBadge}${noCodeActionBtn}${quotedHint}
           <button class="text-link" data-act="lookup" data-code="${escapeHtml(c.code)}">上傳料號對照表</button>
           ${textLinks}
         </td>
@@ -833,7 +839,7 @@ function renderTable() {
       <td>${mapBadge}</td>
       <td>${expBadge}</td>
       <td class="actions">
-        ${actionBtn}${savedHint}
+        ${noteBadge}${actionBtn}${savedHint}
         ${textLinks}
       </td>
       <td></td>
