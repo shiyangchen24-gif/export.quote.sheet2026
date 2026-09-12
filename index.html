@@ -173,9 +173,15 @@ tbody tr:hover{background:var(--paper-50);}
 tbody tr.row-selected{background:var(--ok-100);}
 tbody tr.row-selected:hover{background:#d3ecd0;}
 td.code{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--soil-900);}
+td.cust-name{font-size:15px;font-weight:600;}
 td.actions{text-align:left;position:relative;}
 td.actions .btn{margin-right:8px;vertical-align:middle;}
-.customer-note{color:var(--rust-600);font-size:11.5px;font-weight:600;margin-left:6px;}
+.customer-note{
+  display:inline-flex;align-items:center;
+  color:#FF524D;font-size:11.5px;font-weight:600;
+  border:1.5px dashed #FF524D;border-radius:14px;
+  padding:3px 10px;margin-right:14px;margin-bottom:4px;
+}
 .text-link{
   display:inline-flex;align-items:center;background:none;border:none;
   padding:6px 9px;margin-right:2px;border-radius:7px;
@@ -689,6 +695,6 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-14-supabase-v11"></script>
+<script src="app.js?v=2026-09-15-supabase-v12"></script>
 </body>
 </html>
