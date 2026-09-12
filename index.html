@@ -151,7 +151,8 @@ input,select{font-family:inherit;}
 /* table */
 .table-wrap{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:visible;box-shadow:var(--shadow);}
 #custTable{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;}
-#custTable td.code, #custTable td:nth-child(3){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#custTable td.code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#custTable td.cust-name{white-space:normal;word-break:break-word;}
 #custTable td.actions{white-space:nowrap;} /* 操作欄已加寬，全部項目排在同一行，不再換行 */
 table{width:100%;border-collapse:collapse;font-size:13px;}
 thead th{
@@ -178,10 +179,12 @@ td.actions{text-align:left;position:relative;}
 td.actions .btn{margin-right:8px;vertical-align:middle;}
 .customer-note{
   display:inline-flex;align-items:center;
-  color:#FF524D;font-size:11.5px;font-weight:600;
-  border:1.5px dashed #FF524D;border-radius:14px;
-  padding:3px 10px;margin-right:14px;margin-bottom:4px;
+  color:#FF524D;font-size:11.5px;font-weight:600;font-family:inherit;
+  border:1.5px dashed #FF524D;border-radius:14px;background:transparent;cursor:pointer;
+  padding:3px 10px;margin-left:8px;
+  max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle;
 }
+.customer-note:hover{background:var(--red-bad-bg);}
 .text-link{
   display:inline-flex;align-items:center;background:none;border:none;
   padding:6px 9px;margin-right:2px;border-radius:7px;
@@ -390,6 +393,9 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 <!-- 欄位篩選選單（共用一個，動態定位與內容） -->
 <div class="row-menu" id="colFilterMenu"></div>
 
+<!-- 備註全文彈出視窗（共用一個，動態定位） -->
+<div class="row-menu" id="noteFullTextPopover" style="max-width:320px;padding:12px 14px;white-space:normal;line-height:1.6;font-size:13px;color:var(--ink);"></div>
+
 <!-- ============ 新增/編輯客戶 Modal ============ -->
 <div class="overlay" id="ovCustomer">
   <div class="modal">
@@ -573,15 +579,36 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 
 <!-- ============ 客戶料號對照表 上傳 Modal ============ -->
 <div class="overlay" id="ovLookup">
-  <div class="modal">
+  <div class="modal wide">
     <div class="modal-head">
       <div>
-        <h2 id="lookupTitle">上傳料號對照表</h2>
-        <div class="sub">這個客戶自己的「客戶品名 → 忠欣料號」對照表；上傳會整份取代</div>
+        <h2 id="lookupTitle">料號對照表</h2>
+        <div class="sub">這個客戶自己的「客戶品項名稱 → 忠欣料號」對照表</div>
       </div>
       <button class="modal-close" data-close="ovLookup">✕</button>
     </div>
     <div class="modal-body">
+      <p class="hint" style="margin-bottom:8px;font-weight:600;color:var(--ink);">新增單筆對照</p>
+      <div class="field-row" style="align-items:flex-end;">
+        <div class="field" style="margin-bottom:0;">
+          <label>客戶品項名稱</label>
+          <input type="text" id="newLookupCustName" placeholder="例如 美生菜(客戶自己的叫法)">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>忠欣料號</label>
+          <input type="text" id="newLookupItemCode" list="masterItemsDatalist" placeholder="輸入或選擇料號">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>忠欣品項名稱</label>
+          <input type="text" id="newLookupItemName" placeholder="自動帶入" disabled>
+        </div>
+        <button class="btn btn-secondary" id="btnAddLookupEntry" style="flex-shrink:0;">新增</button>
+      </div>
+      <datalist id="masterItemsDatalist"></datalist>
+      <div class="hint" id="lookupExistingSummary" style="margin:14px 0 6px;"></div>
+      <div class="preview-scroll" style="max-height:220px;"><table id="lookupExistingTable"></table></div>
+
+      <p class="hint" style="margin:18px 0 8px;font-weight:600;color:var(--ink);">或整批上傳（會整份取代上面現有的對照）</p>
       <div class="dropzone" id="lookupDropzone">
         <strong>點擊選擇檔案</strong> 或拖曳 Excel 檔案到此處<br>第一列為標題，需包含「客戶品項名稱」「忠欣料號」欄位（「忠欣品項名稱」可省略）
         <input type="file" id="lookupFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
@@ -592,8 +619,8 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
       </div>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" data-close="ovLookup">取消</button>
-      <button class="btn btn-primary" id="btnConfirmLookup" disabled>確認匯入（整份取代）</button>
+      <button class="btn btn-ghost" data-close="ovLookup">關閉</button>
+      <button class="btn btn-primary" id="btnConfirmLookup" disabled>確認整批匯入（整份取代）</button>
     </div>
   </div>
 </div>
@@ -695,6 +722,6 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-15-supabase-v12"></script>
+<script src="app.js?v=2026-09-16-supabase-v13"></script>
 </body>
 </html>
