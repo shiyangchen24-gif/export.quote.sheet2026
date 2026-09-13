@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-16-supabase-v13';
+const FRONTEND_VERSION = '2026-09-17-supabase-v14';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -413,49 +413,53 @@ function getDiffKey(rec, productCodeMode) {
   return rec['貨號'];
 }
 
-function buildConvertedRecords(rawRows, dataStartRowIdx, columnMap, productCodeMode, previousCodes, itemCodeLookup, masterItems) {
+// rawRowsList：一或多個檔案各自解析出來的二維陣列（單一客戶一次可以上傳多個檔案，
+// 只要這些檔案的欄位格式相同，就能套用同一組 dataStartRowIdx/columnMap 一次處理）
+function buildConvertedRecords(rawRowsList, dataStartRowIdx, columnMap, productCodeMode, previousCodes, itemCodeLookup, masterItems) {
   const identityField = getIdentityField(productCodeMode);
   const prevSet = new Set(previousCodes || []);
   const noCode = productCodeMode === '無貨號';
   const lookupMap = new Map((itemCodeLookup || []).map(x => [x.name, x.code]));
   const masterMap = new Map((masterItems || []).map(m => [m.itemCode, m]));
   const recs = [];
-  for (let r = dataStartRowIdx; r < rawRows.length; r++) {
-    const row = rawRows[r] || [];
-    if (row.every(c => String(c == null ? '' : c).trim() === '')) continue;
-    const rec = {};
-    Object.keys(columnMap).forEach(idxStr => {
-      const idx = +idxStr, field = columnMap[idxStr];
-      let v = row[idx]; v = v == null ? '' : String(v).trim();
-      rec[field] = v;
-    });
-    if (!rec[identityField]) continue;
-    const priceWasZeroOrBlank = !rec['單價'] || !String(rec['單價']).trim() || String(rec['單價']).trim() === '0';
-    if (!rec['單價'] || !String(rec['單價']).trim()) rec['單價'] = '0'; // 無單價自動補0
-    // 有貨號客戶：單價是 0 或空白時，若客戶自己沒填「不報價原因」，自動補「時價」；
-    // 反過來，只要有實際報價（單價不是 0），「不報價原因」一律清空，避免跟有報價的品項邏輯矛盾
-    if (!noCode) {
-      if (priceWasZeroOrBlank) {
-        if (!rec['不報價原因'] || !String(rec['不報價原因']).trim()) rec['不報價原因'] = '時價';
-      } else {
-        rec['不報價原因'] = '';
+  rawRowsList.forEach(rawRows => {
+    for (let r = dataStartRowIdx; r < rawRows.length; r++) {
+      const row = rawRows[r] || [];
+      if (row.every(c => String(c == null ? '' : c).trim() === '')) continue;
+      const rec = {};
+      Object.keys(columnMap).forEach(idxStr => {
+        const idx = +idxStr, field = columnMap[idxStr];
+        let v = row[idx]; v = v == null ? '' : String(v).trim();
+        rec[field] = v;
+      });
+      if (!rec[identityField]) continue;
+      const priceWasZeroOrBlank = !rec['單價'] || !String(rec['單價']).trim() || String(rec['單價']).trim() === '0';
+      if (!rec['單價'] || !String(rec['單價']).trim()) rec['單價'] = '0'; // 無單價自動補0
+      // 有貨號客戶：單價是 0 或空白時，若客戶自己沒填「不報價原因」，自動補「時價」；
+      // 反過來，只要有實際報價（單價不是 0），「不報價原因」一律清空，避免跟有報價的品項邏輯矛盾
+      if (!noCode) {
+        if (priceWasZeroOrBlank) {
+          if (!rec['不報價原因'] || !String(rec['不報價原因']).trim()) rec['不報價原因'] = '時價';
+        } else {
+          rec['不報價原因'] = '';
+        }
       }
-    }
-    if (noCode) {
-      const matchedCode = lookupMap.get(rec['品名']);
-      if (matchedCode) {
-        rec['貨號'] = matchedCode;
-        rec._unmatched = false;
-        const master = masterMap.get(matchedCode);
-        if (master && !rec['單位']) rec['單位'] = master.unit; // 客戶沒填單位時，用忠欣官方單位補上
-      } else {
-        rec['貨號'] = '';
-        rec._unmatched = true;
+      if (noCode) {
+        const matchedCode = lookupMap.get(rec['品名']);
+        if (matchedCode) {
+          rec['貨號'] = matchedCode;
+          rec._unmatched = false;
+          const master = masterMap.get(matchedCode);
+          if (master && !rec['單位']) rec['單位'] = master.unit; // 客戶沒填單位時，用忠欣官方單位補上
+        } else {
+          rec['貨號'] = '';
+          rec._unmatched = true;
+        }
       }
+      rec._isNew = prevSet.size > 0 ? !prevSet.has(getDiffKey(rec, productCodeMode)) : false;
+      recs.push(rec);
     }
-    rec._isNew = prevSet.size > 0 ? !prevSet.has(getDiffKey(rec, productCodeMode)) : false;
-    recs.push(rec);
-  }
+  });
   // 排序：一般品項 → 新增品項(黃底) → 比對不到料號(橘底，最需要處理，排最後最顯眼)
   recs.sort((a, b) => {
     const rank = x => x._unmatched ? 2 : (x._isNew ? 1 : 0);
@@ -526,21 +530,28 @@ async function exportBatchWorkbook(customersWithRecords) {
 
   // 效能關鍵：先把所有列的值組成二維陣列，一次用 addRows 批次插入，
   // 比逐列呼叫 addRow 快上不少（ExcelJS 內部對批次插入有做優化）。
-  const rowValues = flatRows.map(({ customer, rec }) => [
-    customer.code,
-    customer.name || '',
-    rec['貨號'] || '',
-    rec['品名'] || '',
-    rec['單位'] || '',
-    toNumberIfPossible(rec['單價']),
-    rec['備註'] || '',
-    rec['產區品種'] || '',
-    rec['裝箱方式'] || '',
-    rec['包裝資材'] || '',
-    rec['產地'] || '',
-    rec['不報價原因'] || '',
-    rec['變價原因'] || ''
-  ]);
+  // 這裡在匯出當下再次強制校正「有報價就清空不報價原因」，不依賴上傳當下是否已經處理過——
+  // 這樣就算是「上傳報價單並儲存」發生在這個規則加上去之前的舊資料，匯出時還是會被正確修正。
+  const rowValues = flatRows.map(({ customer, rec }) => {
+    const priceNum = toNumberIfPossible(rec['單價']);
+    const hasRealPrice = typeof priceNum === 'number' && Number.isFinite(priceNum) && priceNum !== 0;
+    const reason = hasRealPrice ? '' : (rec['不報價原因'] || '');
+    return [
+      customer.code,
+      customer.name || '',
+      rec['貨號'] || '',
+      rec['品名'] || '',
+      rec['單位'] || '',
+      priceNum,
+      rec['備註'] || '',
+      rec['產區品種'] || '',
+      rec['裝箱方式'] || '',
+      rec['包裝資材'] || '',
+      rec['產地'] || '',
+      reason,
+      rec['變價原因'] || ''
+    ];
+  });
   const addedRows = ws.addRows(rowValues);
   addedRows.forEach((row, i) => {
     const rec = flatRows[i].rec;
@@ -1769,7 +1780,7 @@ function colLetter(i) {
 }
 
 function openWizard(customer) {
-  state.wizard = { customer, rawRows: null, dataStartRowIdx: null, columnMap: {}, numCols: 0, convertedRecords: [], step: 1, usingSaved: false, fileName: '', previousCodes: [], itemCodeLookup: [], isFirstEverExport: true };
+  state.wizard = { customer, rawRowsList: [], dataStartRowIdx: null, columnMap: {}, numCols: 0, convertedRecords: [], step: 1, usingSaved: false, fileNames: [], previousCodes: [], itemCodeLookup: [], isFirstEverExport: true };
   const noCode = customer.productCodeMode === '無貨號';
   document.getElementById('wizardTitle').textContent = `上傳報價單 － ${customer.code} ${customer.name || ''}`;
   document.getElementById('wizardSub').textContent = customer.mapping
@@ -1801,28 +1812,31 @@ function goToWizStep(n) {
   }
 }
 
-setupDropzone('wizDropzone', 'wizFileInput', async file => {
+setupMultiDropzone('wizDropzone', 'wizFileInput', async files => {
   try {
-    setLoading(true, '解析檔案中…');
+    setLoading(true, files.length > 1 ? `解析 ${files.length} 個檔案中…` : '解析檔案中…');
     const noCode = state.wizard.customer.productCodeMode === '無貨號';
-    const [{ rows, hiddenCount }, previousCodes, itemCodeLookup] = await Promise.all([
-      readWorkbookRaw(file),
+    const [parsedFiles, previousCodes, itemCodeLookup] = await Promise.all([
+      Promise.all(files.map(f => readWorkbookRaw(f))),
       fetchPreviousCodes(state.wizard.customer.code),
       noCode ? fetchItemCodeLookup(state.wizard.customer.code) : Promise.resolve([])
     ]);
-    state.wizard.rawRows = rows;
-    state.wizard.fileName = file.name;
+    const rawRowsList = parsedFiles.map(p => p.rows);
+    const totalHidden = parsedFiles.reduce((sum, p) => sum + (p.hiddenCount || 0), 0);
+    state.wizard.rawRowsList = rawRowsList;
+    state.wizard.fileNames = files.map(f => f.name);
     state.wizard.previousCodes = previousCodes;
     state.wizard.itemCodeLookup = itemCodeLookup;
     state.wizard.isFirstEverExport = !previousCodes.length;
-    if (hiddenCount) toast('ok', `已自動排除 ${hiddenCount} 列隱藏列，不會列入辨識`);
+    if (totalHidden) toast('ok', `已自動排除 ${totalHidden} 列隱藏列，不會列入辨識`);
     if (noCode && !itemCodeLookup.length) {
       setLoading(false);
       toast('err', '這個客戶還沒有上傳「料號對照表」，請先在客戶列表點「上傳料號對照表」設定好，才能比對出料號');
       return;
     }
     setLoading(false);
-    if (!rows.length) { toast('err', '檔案沒有資料'); return; }
+    if (!rawRowsList.some(rows => rows.length)) { toast('err', '檔案沒有資料'); return; }
+    if (files.length > 1) toast('ok', `已選取 ${files.length} 個檔案，將套用同一組欄位對應解析全部檔案`);
     const customer = state.wizard.customer;
     if (customer.mapping && customer.mapping.columnMap && Object.keys(customer.mapping.columnMap).length) {
       state.wizard.dataStartRowIdx = customer.mapping.dataStartRowIdx;
@@ -1862,7 +1876,7 @@ function guessHeaderRowIdx(rows, productCodeMode) {
 }
 
 function renderMappingStep() {
-  const rows = state.wizard.rawRows;
+  const rows = state.wizard.rawRowsList[0];
   const productCodeMode = state.wizard.customer.productCodeMode;
   const headerGuessIdx = guessHeaderRowIdx(rows, productCodeMode);
   if (state.wizard.dataStartRowIdx == null) {
@@ -1889,7 +1903,7 @@ function renderMappingStep() {
 }
 
 function renderMapPreviewTable() {
-  const rows = state.wizard.rawRows;
+  const rows = state.wizard.rawRowsList[0];
   const n = state.wizard.numCols;
   const previewRows = rows.slice(0, Math.min(30, rows.length));
   const thead = '<thead><tr><th></th>' + Array.from({ length: n }).map((_, i) => `<th>${colLetter(i)}</th>`).join('') + '</tr></thead>';
@@ -1910,7 +1924,7 @@ function renderMapPreviewTable() {
 }
 
 function renderMapGrid() {
-  const rows = state.wizard.rawRows;
+  const rows = state.wizard.rawRowsList[0];
   const sampleRowIdx = state.wizard.dataStartRowIdx != null ? state.wizard.dataStartRowIdx : 0;
   const sampleRow = rows[sampleRowIdx] || [];
   const n = state.wizard.numCols;
@@ -1939,8 +1953,8 @@ function renderMapGrid() {
 }
 
 function computeConverted() {
-  const { rawRows, dataStartRowIdx, columnMap, customer, previousCodes, itemCodeLookup } = state.wizard;
-  state.wizard.convertedRecords = buildConvertedRecords(rawRows, dataStartRowIdx, columnMap, customer.productCodeMode, previousCodes, itemCodeLookup, state.masterItems);
+  const { rawRowsList, dataStartRowIdx, columnMap, customer, previousCodes, itemCodeLookup } = state.wizard;
+  state.wizard.convertedRecords = buildConvertedRecords(rawRowsList, dataStartRowIdx, columnMap, customer.productCodeMode, previousCodes, itemCodeLookup, state.masterItems);
 }
 
 function renderResultStep() {
@@ -1994,7 +2008,7 @@ function renderResultStep() {
 document.getElementById('wizNext').addEventListener('click', () => {
   const step = state.wizard.step;
   if (step === 1) {
-    if (!state.wizard.rawRows) { toast('err', '請先上傳檔案'); return; }
+    if (!state.wizard.rawRowsList.length) { toast('err', '請先上傳檔案'); return; }
     if (state.wizard.usingSaved) { renderResultStep(); goToWizStep(3); return; }
     renderMappingStep();
     goToWizStep(2);
