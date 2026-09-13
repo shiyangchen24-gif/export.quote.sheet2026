@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-17-supabase-v14';
+const FRONTEND_VERSION = '2026-09-18-supabase-v15';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -112,11 +112,12 @@ function computeExportBadge(c) {
 let state = {
   customers: [],
   activeTab: 'hasCode', // hasCode | noCode
-  statFilter: 'all', // all | exported | notExported | notConfigured
+  stageFilter: 'ready', // setup | pending | ready — 取代原本的統計卡篩選
   cycleFilter: 'all', // all | 7天 | 10天 | 15天 | 30天
   search: '',
+  activeDetailCode: null, // 目前在右側詳情面板顯示的客戶代號
   masterItems: [], // {itemCode, itemName, unit}[] — 全公司共用，切到「無貨號客戶」頁籤時載入
-  selectedCodes: new Set(), // 目前頁籤內被勾選、供批次修改／批次刪除使用的客戶代號
+  selectedCodes: new Set(), // 目前頁籤內被勾選、供批次修改／批次匯出使用的客戶代號（僅限「可批次匯出」階段的客戶）
   wizard: null, // 見 openWizard()
   lookupWizard: null // 見 openLookupWizard()（無貨號客戶：上傳料號對照表）
 };
@@ -158,8 +159,10 @@ async function loadCustomers(showLoading) {
       .order('code');
     if (error) throw new Error(error.message);
     state.customers = (data || []).map(rowToCustomer);
-    renderTable();
-    renderStats();
+    renderStageCards();
+    renderCustomerList();
+    renderDetailPanel();
+    renderExportTray();
   } catch (err) {
     toast('err', '載入失敗：' + err.message);
   } finally {
@@ -383,6 +386,8 @@ async function loadMasterItems() {
     state.masterItems = (data || []).map(r => ({ itemCode: r.item_code, itemName: r.item_name || '', unit: r.unit || '', specCode: r.spec_code || '', grade: r.grade || '' }));
     const countEl = document.getElementById('masterItemsCount');
     if (countEl) countEl.textContent = state.masterItems.length;
+    const countElTop = document.getElementById('masterItemsCountTop');
+    if (countElTop) countElTop.textContent = state.masterItems.length;
   } catch (err) {
     toast('err', '載入忠欣品項主檔失敗：' + err.message);
   }
@@ -711,21 +716,44 @@ async function persistExportResult(customer, records, outName) {
 }
 
 /* ---------------- 統計與表格渲染 ---------------- */
-function renderStats() {
+// 三階段分類（取代原本用統計卡做的 全部/已匯出/尚未匯出/尚未設定 篩選）：
+// setup=還沒設定欄位對應；pending=格式設好了但這期還沒上傳報價單暫存任何品項；ready=已暫存品項、可以批次匯出
+function computeStage(customer) {
+  if (!customer.mapping) return 'setup';
+  const stagedCount = customer.productCodeMode === '無貨號' ? (customer.quotedPricesCount || 0) : (customer.savedRecordsCount || 0);
+  return stagedCount > 0 ? 'ready' : 'pending';
+}
+const STAGE_DEFS = [
+  { key: 'setup', step: '1', title: '待設定匯出格式', sub: '家 · 第一次上傳需設定欄位' },
+  { key: 'pending', step: '2', title: '待上傳報價單', sub: '家' },
+  { key: 'ready', step: '3', title: '可批次匯出', sub: '家 · 已暫存品項' }
+];
+
+function renderStats() { renderStageCards(); }
+
+function renderStageCards() {
   const wantMode = state.activeTab === 'noCode' ? '無貨號' : '有貨號';
   const inTab = state.customers.filter(c => c.productCodeMode === wantMode);
-  const total = inTab.length;
-  let exportedN = 0, notExportedN = 0, notConfiguredN = 0;
+  const counts = { setup: 0, pending: 0, ready: 0 };
+  let overdueN = 0;
   inTab.forEach(c => {
-    const info = computeDueInfo(c);
-    if (info.state === 'active') exportedN++; else notExportedN++;
-    if (!c.mapping) notConfiguredN++;
+    counts[computeStage(c)]++;
+    if (computeDueInfo(c).state === 'overdue') overdueN++;
   });
-  const setN = (sel, v) => { const el = document.querySelector(sel); if (el) el.textContent = v; };
-  setN('#statCards [data-filter="all"] .n', total);
-  setN('#statCards [data-filter="exported"] .n', exportedN);
-  setN('#statCards [data-filter="notExported"] .n', notExportedN);
-  setN('#statCards [data-filter="notConfigured"] .n', notConfiguredN);
+  const el = document.getElementById('stageRow');
+  if (!el) return;
+  el.innerHTML = STAGE_DEFS.map(s => {
+    const on = s.key === state.stageFilter;
+    const sub = (s.key === 'pending' && overdueN > 0) ? `家 · 其中 ${overdueN} 家已逾期` : s.sub;
+    const numFg = s.key === 'pending' ? 'var(--red-bad)' : (s.key === 'ready' ? 'var(--green-ok)' : 'var(--ink-soft)');
+    return `<button class="stage-card${on ? ' active' : ''}" data-stage="${s.key}">
+      <div class="stage-top"><span class="stage-chip">${s.step}</span><span class="stage-title">${s.title}</span></div>
+      <div style="display:flex;align-items:baseline;gap:9px;margin-top:10px;">
+        <span class="stage-num" style="color:${numFg};">${counts[s.key]}</span>
+        <span class="hint">${sub}</span>
+      </div>
+    </button>`;
+  }).join('');
 }
 
 function filteredCustomers() {
@@ -733,129 +761,182 @@ function filteredCustomers() {
   const wantMode = state.activeTab === 'noCode' ? '無貨號' : '有貨號';
   return state.customers.filter(c => {
     if (c.productCodeMode !== wantMode) return false;
-    const info = computeDueInfo(c);
-    if (state.statFilter === 'exported' && info.state !== 'active') return false;
-    if (state.statFilter === 'notExported' && info.state === 'active') return false;
-    if (state.statFilter === 'notConfigured' && c.mapping) return false;
+    if (computeStage(c) !== state.stageFilter) return false;
     if (state.cycleFilter !== 'all' && c.quoteCycle !== state.cycleFilter) return false;
     if (kw && !(String(c.code).toLowerCase().includes(kw) || String(c.name).toLowerCase().includes(kw))) return false;
     return true;
   });
 }
 
-// 兩個頁籤欄位不一樣（無貨號多一欄「料號對照表」、少一欄「報價種類」，報價種類已經由頁籤本身區分），
-// 用頁籤決定要渲染哪一版表頭，而不是寫兩份幾乎重複的 HTML。
-function renderTableHead() {
-  const thead = document.getElementById('tableHead');
-  if (!thead) return;
-  const cycleFilterBtn = `
-    <button class="th-filter-btn" data-filter-col="quoteCycle" aria-label="篩選報價週期" title="篩選">
-      <svg viewBox="0 0 16 16" width="11" height="11"><path d="M1 2h14l-5 6v5l-4 2v-7z" fill="currentColor"/></svg>
-    </button>`;
-  const selectAllTh = `<th class="selcol"><input type="checkbox" id="selectAllCheckbox" title="全選"></th>`;
-  if (state.activeTab === 'noCode') {
-    thead.innerHTML = `<tr>
-      ${selectAllTh}
-      <th style="width:100px;">客戶代號</th>
-      <th style="width:260px;">客戶名稱</th>
-      <th style="width:100px;">報價週期 ${cycleFilterBtn}</th>
-      <th style="width:110px;">料號對照表</th>
-      <th style="width:100px;">匯出格式</th>
-      <th style="width:150px;">匯出狀態</th>
-      <th style="width:760px;">操作</th>
-      <th></th>
-    </tr>`;
+const STAGE_LIST_META = {
+  setup: { stText: '尚未設定格式', stBg: 'var(--red-bad-bg)', stFg: 'var(--red-bad)', actText: '設定匯出格式' },
+  pending: { stText: '待上傳報價單', stBg: 'var(--red-bad-bg)', stFg: 'var(--red-bad)', actText: '上傳報價單' },
+  ready: { stText: '已上傳 · 可匯出', stBg: 'var(--green-ok-bg)', stFg: 'var(--green-ok)', actText: '重新上傳' }
+};
+
+function renderCustomerList() {
+  const wantMode = state.activeTab === 'noCode' ? '無貨號' : '有貨號';
+  const allInTab = state.customers.filter(c => c.productCodeMode === wantMode);
+  const totalInTab = allInTab.length;
+  const list = filteredCustomers();
+  const empty = document.getElementById('emptyState');
+  const head = document.getElementById('custListHead');
+  const body = document.getElementById('custListBody');
+  const foot = document.getElementById('custListFoot');
+  const titles = { setup: '① 待設定匯出格式', pending: '② 待上傳報價單', ready: '③ 可批次匯出' };
+  const hints = {
+    setup: '第一次上傳報價單時設定欄位對應，之後自動套用',
+    pending: '格式已設定好，把這期的報價單丟進來就會自動解析',
+    ready: '已解析並暫存品項，勾選後合併成一份匯入檔'
+  };
+  document.getElementById('listTitle').textContent = titles[state.stageFilter];
+  document.getElementById('listHint').textContent = hints[state.stageFilter];
+
+  const readyInTab = allInTab.filter(c => computeStage(c) === 'ready');
+  const allChecked = readyInTab.length > 0 && readyInTab.every(c => state.selectedCodes.has(c.code));
+  head.innerHTML = `
+    <span style="width:18px;flex-shrink:0;"><input type="checkbox" id="selectAllCheckbox" title="全選（僅限可匯出的客戶）" ${allChecked ? 'checked' : ''}></span>
+    <span style="width:72px;flex-shrink:0;">客戶代號</span>
+    <span style="flex:1;min-width:0;">客戶名稱</span>
+    <span style="width:150px;flex-shrink:0;">準備狀態</span>
+    <span style="width:130px;flex-shrink:0;">到期日</span>
+    <span style="width:190px;flex-shrink:0;text-align:right;">下一步</span>`;
+
+  if (!list.length) {
+    body.innerHTML = '';
+    empty.style.display = 'block';
+    empty.querySelector('h3').textContent = state.customers.length ? '這個階段目前沒有客戶' : '還沒有客戶資料';
+    empty.querySelector('p').textContent = state.customers.length ? '試試調整搜尋、報價週期，或切換其他階段' : '請先「新增客戶」或「批次匯入客戶」建立客戶主檔';
   } else {
-    thead.innerHTML = `<tr>
-      ${selectAllTh}
-      <th style="width:100px;">客戶代號</th>
-      <th style="width:260px;">客戶名稱</th>
-      <th style="width:100px;">報價週期 ${cycleFilterBtn}</th>
-      <th style="width:100px;">匯出格式</th>
-      <th style="width:150px;">匯出狀態</th>
-      <th style="width:640px;">操作</th>
-      <th></th>
-    </tr>`;
+    empty.style.display = 'none';
+    body.innerHTML = list.map(c => {
+      const stage = computeStage(c);
+      const m = STAGE_LIST_META[stage];
+      const info = computeDueInfo(c);
+      const due = stage === 'setup' ? '—' : (info.due ? (info.state === 'overdue' ? '⚠ 已逾期 ' : '到期 ') + formatDateShort(info.due) : '—');
+      const dueFg = info.state === 'overdue' ? 'var(--red-bad)' : 'var(--ink-soft)';
+      const isActive = c.code === state.activeDetailCode;
+      const checked = state.selectedCodes.has(c.code) ? 'checked' : '';
+      const noteBadge = c.notes ? `<button class="customer-note" data-act="shownote" data-code="${escapeHtml(c.code)}" style="flex-shrink:0;" title="點擊查看完整備註">備註 : ${escapeHtml(c.notes)}</button>` : '';
+      return `<div class="cust-row${isActive ? ' active' : ''}" data-open-code="${escapeHtml(c.code)}">
+        <span style="width:18px;flex-shrink:0;" data-stop-row><input type="checkbox" class="rowCheckbox" data-code="${escapeHtml(c.code)}" ${checked} ${stage !== 'ready' ? 'disabled' : ''}></span>
+        <span class="mono" style="width:72px;flex-shrink:0;font-size:12.5px;font-weight:700;color:var(--ink);">${escapeHtml(c.code)}</span>
+        <span style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(c.name)}</span>
+          ${noteBadge}
+        </span>
+        <span style="width:150px;flex-shrink:0;"><span class="badge" style="background:${m.stBg};color:${m.stFg};">${m.stText}</span></span>
+        <span style="width:130px;flex-shrink:0;font-size:12.5px;font-weight:600;color:${dueFg};">${due}</span>
+        <span style="width:190px;flex-shrink:0;display:flex;justify-content:flex-end;">
+          <button class="btn small ${stage === 'ready' ? 'btn-secondary' : 'btn-upload'}" data-act="upload" data-code="${escapeHtml(c.code)}" data-stop-row>${m.actText}</button>
+        </span>
+      </div>`;
+    }).join('');
   }
-  updateFilterIconStates();
+  foot.innerHTML = `<span>顯示 ${list.length} / ${allInTab.filter(c => computeStage(c) === state.stageFilter).length} 家（共 ${totalInTab} 家${wantMode}客戶）</span><span class="mono">前端版本 ${FRONTEND_VERSION}</span>`;
+  syncSelectAllCheckbox();
 }
 
-function renderTable() {
-  const list = filteredCustomers();
-  const tbody = document.getElementById('custTbody');
-  const empty = document.getElementById('emptyState');
-  if (!list.length) {
-    tbody.innerHTML = '';
-    empty.style.display = 'block';
-    empty.querySelector('h3').textContent = state.customers.length ? '找不到符合的客戶' : '還沒有客戶資料';
-    empty.querySelector('p').textContent = state.customers.length ? '試試調整搜尋或篩選條件' : '請先「新增客戶」或「批次匯入客戶」建立客戶主檔';
+function renderDetailPanel() {
+  const el = document.getElementById('detailCard');
+  const customer = state.customers.find(c => c.code === state.activeDetailCode);
+  if (!customer) {
+    el.innerHTML = `<div class="detail-empty">點左側任一客戶，這裡會顯示他的格式、品項與紀錄</div>`;
     return;
   }
-  empty.style.display = 'none';
-  tbody.innerHTML = list.map(c => {
-    const exp = computeExportBadge(c);
-    const mapSet = !!c.mapping;
-    const mapBadge = mapSet ? `<span class="badge badge-green">已設定</span>` : `<span class="badge badge-red">尚未設定</span>`;
-    const expBadge = `<span class="badge ${exp.cls}">${exp.label}</span>` +
-      (exp.due ? `<div class="hint" style="margin-top:3px;">${exp.overdue ? '⚠ 已逾期 ' : '到期 '}${formatDateShort(exp.due)}</div>` : '');
-    const savedCount = c.savedRecordsCount || 0;
-    const actionBtn = mapSet
-      ? `<button class="btn small ${savedCount > 0 ? 'btn-secondary' : 'btn-upload'}" data-act="upload" data-code="${escapeHtml(c.code)}">${savedCount > 0 ? '重新上傳報價單' : '上傳報價單'}</button>`
-      : `<button class="btn small btn-upload" data-act="upload" data-code="${escapeHtml(c.code)}">上傳報價單</button>`;
-    const savedHint = savedCount > 0 ? `<span class="hint" style="margin-right:14px;">已儲存 ${savedCount} 筆待匯出</span>` : '';
-    const isSelected = state.selectedCodes.has(c.code);
-    const checked = isSelected ? 'checked' : '';
-    const rowCls = isSelected ? ' class="row-selected"' : '';
-    const checkboxCell = `<td class="selcol"><input type="checkbox" class="rowCheckbox" data-code="${escapeHtml(c.code)}" ${checked}></td>`;
-    const nameCell = `<td class="cust-name">${escapeHtml(c.name)}${c.notes ? `<button class="customer-note" data-act="shownote" data-code="${escapeHtml(c.code)}" title="點擊查看完整備註">備註 : ${escapeHtml(c.notes)}</button>` : ''}</td>`;
-    const textLinks = `
-        <button class="text-link" data-act="history" data-code="${escapeHtml(c.code)}">查看紀錄</button>
-        <button class="text-link" data-act="edit" data-code="${escapeHtml(c.code)}">編輯</button>
-        <button class="text-link" data-act="reconfigure" data-code="${escapeHtml(c.code)}">重新設定欄位對應</button>
-        <button class="text-link danger" data-act="delete" data-code="${escapeHtml(c.code)}">刪除</button>`;
+  const stage = computeStage(customer);
+  const m = STAGE_LIST_META[stage];
+  const info = computeDueInfo(customer);
+  const due = info.due ? (info.state === 'overdue' ? '⚠ 已逾期 ' : '到期 ') + formatDateShort(info.due) : '—';
+  const dueFg = info.state === 'overdue' ? 'var(--red-bad)' : 'var(--ink-soft)';
+  const noCode = customer.productCodeMode === '無貨號';
+  const stagedCount = noCode ? (customer.quotedPricesCount || 0) : (customer.savedRecordsCount || 0);
+  const noteHtml = customer.notes
+    ? `<div style="display:inline-flex;align-items:center;color:#FF524D;font-size:11.5px;font-weight:700;border:1.5px dashed #FF524D;border-radius:999px;padding:4px 11px;margin-top:10px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">備註 : ${escapeHtml(customer.notes)}</div>`
+    : '';
+  const lookupCount = customer.itemCodeLookupCount || 0;
+  el.innerHTML = `
+    <div class="detail-card">
+      <div class="detail-head">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
+          <div>
+            <div class="mono" style="font-size:12.5px;font-weight:700;color:var(--ink-soft);">${escapeHtml(customer.code)}</div>
+            <h2 style="margin:3px 0 0;font-size:19px;font-weight:700;">${escapeHtml(customer.name)}</h2>
+          </div>
+          <button data-act="closedetail" style="width:30px;height:30px;border:none;border-radius:10px;background:var(--paper-100);color:var(--ink-soft);font-size:14px;flex-shrink:0;">✕</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;">
+          <span class="badge" style="background:${m.stBg};color:${m.stFg};">${m.stText}</span>
+          <span style="font-size:12.5px;font-weight:600;color:${dueFg};">${due}</span>
+          <span class="hint">· 報價週期 ${escapeHtml(customer.quoteCycle)}${customer.unitCategory ? '（' + escapeHtml(customer.unitCategory) + '）' : ''}</span>
+        </div>
+        ${noteHtml}
+      </div>
+      <div class="detail-body">
+        <button class="btn ${stage === 'ready' ? 'btn-secondary' : 'btn-upload'}" data-act="upload" data-code="${escapeHtml(customer.code)}" style="width:100%;">${m.actText}</button>
+        <div class="detail-grid">
+          <div class="detail-grid-cell">
+            <div class="hint" style="font-weight:600;">匯出格式</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px;">
+              <span class="badge ${customer.mapping ? 'badge-green' : 'badge-red'}">${customer.mapping ? '已設定' : '尚未設定'}</span>
+              ${customer.mapping ? `<button class="text-link" data-act="reconfigure" data-code="${escapeHtml(customer.code)}" style="margin:0;padding:2px 4px;">重新設定</button>` : ''}
+            </div>
+          </div>
+          <div class="detail-grid-cell">
+            <div class="hint" style="font-weight:600;">最後匯出</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px;">
+              <span style="font-size:12.5px;font-weight:700;">${customer.lastExportTime ? formatDateShort(new Date(customer.lastExportTime)) : '—'}</span>
+              <button class="text-link" data-act="history" data-code="${escapeHtml(customer.code)}" style="margin:0;padding:2px 4px;">查看紀錄</button>
+            </div>
+          </div>
+          ${noCode ? `
+          <div class="detail-grid-cell" style="grid-column:1 / -1;">
+            <div class="hint" style="font-weight:600;">料號對照表</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px;">
+              <span class="badge ${lookupCount > 0 ? 'badge-green' : 'badge-red'}">${lookupCount > 0 ? `已設定（${lookupCount} 筆）` : '尚未設定'}</span>
+              <button class="text-link" data-act="lookup" data-code="${escapeHtml(customer.code)}" style="margin:0;padding:2px 4px;">${lookupCount > 0 ? '管理對照' : '設定'}</button>
+            </div>
+          </div>` : ''}
+        </div>
+        <div>
+          <div class="hint" style="font-weight:700;margin-bottom:7px;">本次暫存品項${stagedCount ? `（${stagedCount} 項）` : ''}</div>
+          ${stagedCount > 0
+            ? `<div style="border:1px solid var(--line);border-radius:12px;padding:12px;font-size:12.5px;color:var(--ink-soft);">已暫存 ${stagedCount} 項，勾選後可在「本期匯出清單」批次匯出成一份檔案。</div>`
+            : `<div style="border:1.5px dashed var(--line);border-radius:12px;padding:16px;text-align:center;font-size:12.5px;color:var(--ink-soft);">${customer.mapping ? '這期還沒上傳報價單，上傳後品項會先暫存在這裡。' : '這家客戶還沒設定欄位對應，上傳第一份報價單時設定一次即可。'}</div>`}
+        </div>
+        <div class="detail-actions">
+          <button class="text-link" data-act="edit" data-code="${escapeHtml(customer.code)}">編輯客戶</button>
+          <button class="text-link" data-act="history" data-code="${escapeHtml(customer.code)}">匯出紀錄</button>
+          <button class="text-link" data-act="unexport" data-code="${escapeHtml(customer.code)}">清除紀錄</button>
+          <div style="flex:1;"></div>
+          <button class="text-link danger" data-act="delete" data-code="${escapeHtml(customer.code)}">刪除</button>
+        </div>
+      </div>
+    </div>`;
+}
 
-    if (state.activeTab === 'noCode') {
-      const lookupCount = c.itemCodeLookupCount || 0;
-      const lookupBadge = lookupCount > 0
-        ? `<span class="badge badge-green">已設定</span><div class="hint" style="margin-top:3px;">${lookupCount} 筆</div>`
-        : `<span class="badge badge-red">尚未設定</span>`;
-      const quotedCount = c.quotedPricesCount || 0;
-      const noCodeActionBtn = mapSet
-        ? `<button class="btn small ${quotedCount > 0 ? 'btn-secondary' : 'btn-upload'}" data-act="upload" data-code="${escapeHtml(c.code)}">${quotedCount > 0 ? '重新上傳報價單' : '上傳報價單'}</button>`
-        : `<button class="btn small btn-upload" data-act="upload" data-code="${escapeHtml(c.code)}">上傳報價單</button>`;
-      const quotedHint = quotedCount > 0 ? `<span class="hint" style="margin-right:14px;">已儲存 ${quotedCount} 筆待匯出</span>` : '';
-      const cycleCell = `${escapeHtml(c.quoteCycle)}${c.unitCategory ? `<div class="hint" style="margin-top:3px;">${escapeHtml(c.unitCategory)}</div>` : ''}`;
-      return `<tr${rowCls}>
-        ${checkboxCell}
-        <td class="code">${escapeHtml(c.code)}</td>
-        ${nameCell}
-        <td class="mono" style="font-size:12.5px;">${cycleCell}</td>
-        <td>${lookupBadge}</td>
-        <td>${mapBadge}</td>
-        <td>${expBadge}</td>
-        <td class="actions">
-          ${noCodeActionBtn}${quotedHint}
-          <button class="text-link" data-act="lookup" data-code="${escapeHtml(c.code)}">上傳料號對照表</button>
-          ${textLinks}
-        </td>
-        <td></td>
-      </tr>`;
-    }
-    return `<tr${rowCls}>
-      ${checkboxCell}
-      <td class="code">${escapeHtml(c.code)}</td>
-      ${nameCell}
-      <td class="mono" style="font-size:12.5px;">${escapeHtml(c.quoteCycle)}</td>
-      <td>${mapBadge}</td>
-      <td>${expBadge}</td>
-      <td class="actions">
-        ${actionBtn}${savedHint}
-        ${textLinks}
-      </td>
-      <td></td>
-    </tr>`;
-  }).join('');
-  syncSelectAllCheckbox();
+function renderExportTray() {
+  const wantMode = state.activeTab === 'noCode' ? '無貨號' : '有貨號';
+  const trayCustomers = Array.from(state.selectedCodes)
+    .map(code => state.customers.find(c => c.code === code))
+    .filter(c => c && c.productCodeMode === wantMode);
+  const countField = wantMode === '無貨號' ? 'quotedPricesCount' : 'savedRecordsCount';
+  document.getElementById('trayCount').textContent = trayCustomers.length;
+  const list = document.getElementById('trayList');
+  if (!trayCustomers.length) {
+    list.innerHTML = `<div style="padding:18px 10px;text-align:center;font-size:12.5px;color:var(--ink-soft);">還沒有勾選客戶。在「可批次匯出」清單裡勾選要合併的客戶。</div>`;
+  } else {
+    list.innerHTML = trayCustomers.map(c => `
+      <div class="tray-row">
+        <span class="mono" style="width:52px;flex-shrink:0;font-size:11.5px;font-weight:700;">${escapeHtml(c.code)}</span>
+        <span style="flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(c.name)}</span>
+        <span class="mono hint" style="flex-shrink:0;">${c[countField] || 0} 項</span>
+        <button data-act="untray" data-code="${escapeHtml(c.code)}" style="border:none;background:transparent;color:var(--ink-soft);font-size:13px;flex-shrink:0;">✕</button>
+      </div>`).join('');
+  }
+  const trayItems = trayCustomers.reduce((a, c) => a + (c[countField] || 0), 0);
+  document.getElementById('trayItemsTotal').textContent = trayItems + ' 項';
+  updateBulkButtonsState();
 }
 
 /* ---------------- 頁籤切換（有貨號／無貨號客戶） ---------------- */
@@ -867,16 +948,17 @@ document.getElementById('tabRow').addEventListener('click', e => {
   state.activeTab = tab;
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
   document.getElementById('masterItemsPanel').style.display = tab === 'noCode' ? 'flex' : 'none';
-  document.getElementById('btnBatchExport').style.display = 'inline-flex';
-  // 統計卡篩選跟表頭欄位篩選都是「頁籤內」的概念，切頁籤時重置，避免帶著上個頁籤的篩選條件卻找不到東西
-  state.statFilter = 'all';
+  document.getElementById('btnMasterItemsTop').style.display = tab === 'noCode' ? 'inline-flex' : 'none';
+  // 階段篩選跟頁籤內選取都是「頁籤內」的概念，切頁籤時重置，避免帶著上個頁籤的篩選條件卻找不到東西
+  state.stageFilter = 'ready';
   state.cycleFilter = 'all';
-  state.selectedCodes.clear(); // 勾選也是頁籤內的概念，切頁籤時一併清空
-  document.querySelectorAll('#statCards .stat-card').forEach(c => c.classList.toggle('active', c.getAttribute('data-filter') === 'all'));
-  renderTableHead();
-  renderTable();
+  state.selectedCodes.clear();
+  state.activeDetailCode = null;
+  renderStageCards();
+  renderCustomerList();
+  renderDetailPanel();
+  renderExportTray();
   renderStats();
-  updateBulkButtonsState();
   if (tab === 'noCode' && !state.masterItems.length) loadMasterItems();
 });
 
@@ -887,56 +969,106 @@ function upsertCustomer(customer) {
   const idx = state.customers.findIndex(c => c.code === customer.code);
   if (idx === -1) state.customers.push(customer);
   else state.customers[idx] = customer;
-  renderTable();
-  renderStats();
+  renderStageCards();
+  renderCustomerList();
+  if (customer.code === state.activeDetailCode) renderDetailPanel();
+  renderExportTray();
 }
 
-document.getElementById('custTbody').addEventListener('click', e => {
+// 客戶清單：按鈕動作（上傳/查看紀錄/備註彈窗）優先判斷；不是按鈕的地方點擊就當作「開啟這列的詳情面板」
+document.getElementById('custListBody').addEventListener('click', e => {
   const btn = e.target.closest('button[data-act]');
-  if (!btn) return;
-  const code = btn.getAttribute('data-code');
-  const customer = state.customers.find(c => c.code === code);
-  if (!customer) return;
-  const act = btn.getAttribute('data-act');
-  try {
-    if (act === 'upload' || act === 'export') openWizard(customer);
-    else if (act === 'history') openHistoryModal(customer);
-    else if (act === 'edit') openCustomerModal(customer);
-    else if (act === 'reconfigure') reconfigureMapping(customer);
-    else if (act === 'delete') deleteCustomerSingle(customer);
-    else if (act === 'lookup') openLookupWizard(customer);
-    else if (act === 'shownote') openNoteFullText(btn, customer.notes);
-  } catch (err) {
-    toast('err', '操作失敗，頁面可能不是最新版本，請重新整理或確認部署檔案是否為最新：' + err.message);
+  if (btn) {
+    const code = btn.getAttribute('data-code');
+    const customer = state.customers.find(c => c.code === code);
+    if (!customer) return;
+    const act = btn.getAttribute('data-act');
+    try {
+      if (act === 'upload') openWizard(customer);
+      else if (act === 'shownote') openNoteFullText(btn, customer.notes);
+    } catch (err) {
+      toast('err', '操作失敗，頁面可能不是最新版本，請重新整理或確認部署檔案是否為最新：' + err.message);
+    }
+    return;
   }
+  if (e.target.closest('input')) return; // checkbox 自己的點擊交給下面的 change 監聽處理
+  const row = e.target.closest('.cust-row');
+  if (!row) return;
+  state.activeDetailCode = row.getAttribute('data-open-code');
+  renderCustomerList();
+  renderDetailPanel();
 });
 
-document.getElementById('custTbody').addEventListener('change', e => {
+document.getElementById('custListBody').addEventListener('change', e => {
   const cb = e.target.closest('input.rowCheckbox');
   if (!cb) return;
   const code = cb.getAttribute('data-code');
   if (cb.checked) state.selectedCodes.add(code);
   else state.selectedCodes.delete(code);
-  const tr = cb.closest('tr');
-  if (tr) tr.classList.toggle('row-selected', cb.checked);
   updateBulkButtonsState();
   syncSelectAllCheckbox();
+  renderExportTray();
 });
 
-// 點擊列的其他地方（不是按鈕/文字連結/checkbox本身）也能切換該列勾選，不用一定要點中小方框
-document.getElementById('custTbody').addEventListener('click', e => {
-  if (e.target.closest('button[data-act]') || e.target.closest('input')) return;
-  const tr = e.target.closest('tr');
-  if (!tr) return;
-  const cb = tr.querySelector('input.rowCheckbox');
-  if (!cb) return;
-  cb.checked = !cb.checked;
-  cb.dispatchEvent(new Event('change', { bubbles: true }));
+// 詳情面板裡的動作按鈕：編輯／查看紀錄／清除紀錄／刪除／重新設定欄位對應／料號對照表／關閉
+document.getElementById('detailCard').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const act = btn.getAttribute('data-act');
+  if (act === 'closedetail') { state.activeDetailCode = null; renderCustomerList(); renderDetailPanel(); return; }
+  const code = btn.getAttribute('data-code');
+  const customer = state.customers.find(c => c.code === code);
+  if (!customer) return;
+  try {
+    if (act === 'upload') openWizard(customer);
+    else if (act === 'history') openHistoryModal(customer);
+    else if (act === 'edit') openCustomerModal(customer);
+    else if (act === 'reconfigure') reconfigureMapping(customer);
+    else if (act === 'delete') deleteCustomerSingle(customer);
+    else if (act === 'lookup') openLookupWizard(customer);
+    else if (act === 'unexport') unexportCustomer(customer);
+  } catch (err) {
+    toast('err', '操作失敗，頁面可能不是最新版本，請重新整理或確認部署檔案是否為最新：' + err.message);
+  }
+});
+
+// 本期匯出清單裡的 ✕：把這個客戶從勾選清單移除
+document.getElementById('trayList').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-act="untray"]');
+  if (!btn) return;
+  const code = btn.getAttribute('data-code');
+  state.selectedCodes.delete(code);
+  renderCustomerList();
+  renderExportTray();
+});
+
+document.getElementById('btnClearTray').addEventListener('click', () => {
+  state.selectedCodes.clear();
+  renderCustomerList();
+  renderExportTray();
+});
+
+document.getElementById('stageRow').addEventListener('click', e => {
+  const btn = e.target.closest('.stage-card');
+  if (!btn) return;
+  state.stageFilter = btn.getAttribute('data-stage');
+  renderStageCards();
+  renderCustomerList();
+});
+
+document.getElementById('cycleFilterSelect').addEventListener('change', e => {
+  state.cycleFilter = e.target.value;
+  renderCustomerList();
+});
+
+document.getElementById('btnMasterItemsTop').addEventListener('click', () => {
+  document.getElementById('btnMasterItems').click();
 });
 
 async function unexportCustomer(customer) {
   if (!confirm(`確定要清除 ${customer.code} 的匯出紀錄嗎？清除後將視為「尚未匯出過」，到期日重新計算。`)) return;
   setLoading(true, '更新狀態…');
+
   try {
     assertSb();
     const { data, error } = await sb.from('customers').update({
@@ -973,7 +1105,8 @@ async function deleteCustomerSingle(customer) {
     if (error) throw new Error(error.message);
     state.customers = state.customers.filter(c => c.code !== customer.code);
     state.selectedCodes.delete(customer.code);
-    renderTable(); renderStats(); updateBulkButtonsState();
+    if (state.activeDetailCode === customer.code) state.activeDetailCode = null;
+    renderStageCards(); renderCustomerList(); renderDetailPanel(); renderExportTray(); updateBulkButtonsState();
     toast('ok', `已刪除 ${customer.code}`);
   } catch (err) { toast('err', err.message); }
   finally { setLoading(false); }
@@ -1001,14 +1134,15 @@ function syncSelectAllCheckbox() {
   selectAll.checked = allSelected;
   selectAll.indeterminate = !allSelected && visibleCodes.some(code => state.selectedCodes.has(code));
 }
-document.getElementById('tableHead').addEventListener('change', e => {
+document.getElementById('custListHead').addEventListener('change', e => {
   const cb = e.target.closest('#selectAllCheckbox');
   if (!cb) return;
-  const visible = filteredCustomers();
+  const visible = filteredCustomers().filter(c => computeStage(c) === 'ready');
   if (cb.checked) visible.forEach(c => state.selectedCodes.add(c.code));
   else visible.forEach(c => state.selectedCodes.delete(c.code));
-  renderTable();
+  renderCustomerList();
   updateBulkButtonsState();
+  renderExportTray();
 });
 
 document.getElementById('btnBatchDelete').addEventListener('click', async () => {
@@ -1021,8 +1155,9 @@ document.getElementById('btnBatchDelete').addEventListener('click', async () => 
     const { error } = await sb.from('customers').delete().in('code', codes);
     if (error) throw new Error(error.message);
     state.customers = state.customers.filter(c => !state.selectedCodes.has(c.code));
+    if (state.selectedCodes.has(state.activeDetailCode)) state.activeDetailCode = null;
     state.selectedCodes.clear();
-    renderTable(); renderStats(); updateBulkButtonsState();
+    renderStageCards(); renderCustomerList(); renderDetailPanel(); renderExportTray(); updateBulkButtonsState();
     toast('ok', `已刪除 ${codes.length} 筆客戶`);
   } catch (err) { toast('err', err.message); }
   finally { setLoading(false); }
@@ -1080,7 +1215,7 @@ document.getElementById('btnBatchExport').addEventListener('click', async () => 
     if (error) throw new Error(error.message);
     (data || []).forEach(row => upsertCustomer(rowToCustomer(row)));
     state.selectedCodes.clear();
-    renderTable(); updateBulkButtonsState();
+    renderCustomerList(); renderExportTray(); updateBulkButtonsState();
     toast('ok', `已匯出 ${ready.length} 家客戶的合併報價單`);
   } catch (err) {
     toast('err', '批次匯出失敗：' + err.message);
@@ -1346,84 +1481,12 @@ document.getElementById('btnConfirmLookup').addEventListener('click', async () =
   finally { setLoading(false); }
 });
 
-/* ---------------- 篩選列（搜尋 / 統計卡 / 欄位篩選 icon） ---------------- */
+/* ---------------- 篩選列（搜尋 / 報價週期） ---------------- */
 document.getElementById('searchInput').addEventListener('input', e => {
-  state.search = e.target.value; renderTable(); syncSelectAllCheckbox();
-});
-document.getElementById('statCards').addEventListener('click', e => {
-  const card = e.target.closest('.stat-card');
-  if (!card) return;
-  state.statFilter = card.getAttribute('data-filter');
-  document.querySelectorAll('#statCards .stat-card').forEach(c => c.classList.toggle('active', c === card));
-  renderTable();
-  syncSelectAllCheckbox();
+  state.search = e.target.value; renderCustomerList(); syncSelectAllCheckbox();
 });
 
-/* 表頭欄位篩選（報價週期旁的篩選 icon；報價種類現在由頁籤區分，不需要再篩選） */
-const COLUMN_FILTER_OPTIONS = {
-  quoteCycle: { stateKey: 'cycleFilter', options: [['all', '全部週期'], ['7天', '7天'], ['10天', '10天'], ['15天', '15天'], ['30天', '30天']] }
-};
-const colFilterMenuEl = document.getElementById('colFilterMenu');
-let colFilterCurrentCol = null;
-
-function updateFilterIconStates() {
-  document.querySelectorAll('.th-filter-btn[data-filter-col]').forEach(btn => {
-    const col = btn.getAttribute('data-filter-col');
-    const cfg = COLUMN_FILTER_OPTIONS[col];
-    if (!cfg) return;
-    btn.classList.toggle('active', state[cfg.stateKey] !== 'all');
-  });
-}
-
-function openColFilterMenu(btn, col) {
-  const cfg = COLUMN_FILTER_OPTIONS[col];
-  if (!cfg) return;
-  colFilterCurrentCol = col;
-  const current = state[cfg.stateKey];
-  colFilterMenuEl.innerHTML = cfg.options.map(([value, label]) => `
-    <label>
-      <input type="radio" name="colFilterRadio" value="${value}" ${current === value ? 'checked' : ''}>
-      ${escapeHtml(label)}
-    </label>
-  `).join('');
-  colFilterMenuEl.style.display = 'flex';
-  const rect = btn.getBoundingClientRect();
-  const menuRect = colFilterMenuEl.getBoundingClientRect();
-  let top = rect.bottom + 6;
-  if (top + menuRect.height > window.innerHeight) top = rect.top - menuRect.height - 6;
-  let left = rect.left;
-  if (left + menuRect.width > window.innerWidth - 8) left = window.innerWidth - menuRect.width - 8;
-  colFilterMenuEl.style.top = top + 'px';
-  colFilterMenuEl.style.left = left + 'px';
-}
-function closeColFilterMenu() { colFilterMenuEl.style.display = 'none'; colFilterCurrentCol = null; }
-
-// 用事件委派綁在穩定的 tableHead 容器上，而不是綁在個別按鈕：
-// 表頭在切頁籤時會被 renderTableHead() 整個重繪，綁在按鈕本身的監聽器會跟著舊元素一起消失。
-document.getElementById('tableHead').addEventListener('click', e => {
-  const btn = e.target.closest('.th-filter-btn[data-filter-col]');
-  if (!btn) return;
-  e.stopPropagation();
-  const col = btn.getAttribute('data-filter-col');
-  if (colFilterCurrentCol === col && colFilterMenuEl.style.display === 'flex') { closeColFilterMenu(); return; }
-  openColFilterMenu(btn, col);
-});
-colFilterMenuEl.addEventListener('change', e => {
-  const radio = e.target.closest('input[name="colFilterRadio"]');
-  if (!radio || !colFilterCurrentCol) return;
-  const cfg = COLUMN_FILTER_OPTIONS[colFilterCurrentCol];
-  state[cfg.stateKey] = radio.value;
-  updateFilterIconStates();
-  renderTable();
-  syncSelectAllCheckbox();
-  closeColFilterMenu();
-});
-document.addEventListener('click', e => {
-  if (e.target.closest('#colFilterMenu') || e.target.closest('[data-filter-col]')) return;
-  closeColFilterMenu();
-});
-
-// 備註全文彈出視窗：備註太長時，點擊徽章看完整內容（跟欄位篩選 popover 共用同一套定位邏輯）
+// 備註全文彈出視窗：備註太長時，點擊徽章看完整內容
 const noteFullTextEl = document.getElementById('noteFullTextPopover');
 function openNoteFullText(btn, text) {
   noteFullTextEl.textContent = text || '';
@@ -1454,7 +1517,7 @@ document.getElementById('btnResetAll').addEventListener('click', async () => {
     }).not('code', 'is', null).select();
     if (error) throw new Error(error.message);
     state.customers = (data || []).map(rowToCustomer);
-    renderTable(); renderStats();
+    renderStageCards(); renderCustomerList(); renderDetailPanel(); renderExportTray();
     toast('ok', '已清除全部客戶的匯出紀錄');
   } catch (err) { toast('err', err.message); }
   finally { setLoading(false); }
@@ -2076,7 +2139,10 @@ document.getElementById('wizExport').addEventListener('click', async () => {
 /* ---------------- 初始化 ---------------- */
 const _fvStamp = document.getElementById('frontendVersionStamp');
 if (_fvStamp) _fvStamp.textContent = FRONTEND_VERSION; else console.warn('找不到版本標示欄位，頁面可能不是最新版本');
-renderTableHead();
+renderStageCards();
+renderCustomerList();
+renderDetailPanel();
+renderExportTray();
 if (!sb) {
   toast('err', sbInitError || '尚未設定 Supabase 連線資訊，請在 app.js 開頭填入 SUPABASE_URL 與 SUPABASE_ANON_KEY 後再重新整理');
   console.error('[Supabase 設定問題]', sbInitError);
