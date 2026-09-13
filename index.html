@@ -213,6 +213,68 @@ td.selcol input, th.selcol input{width:14px;height:14px;cursor:pointer;}
 .empty-state h3{margin:0 0 4px;color:var(--ink);font-size:15px;}
 .empty-state p{margin:0;font-size:13px;}
 
+/* ---- 版面重新設計：清單+側邊詳情面板，取代原本的寬表格 ---- */
+.topbar-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+
+.stage-row{display:flex;gap:12px;margin-bottom:18px;}
+.stage-card{
+  flex:1;text-align:left;font-family:inherit;cursor:pointer;background:var(--paper-50);
+  border:1.5px solid var(--line);border-radius:16px;padding:16px 20px;
+  transition:border-color .16s,box-shadow .16s;
+}
+.stage-card.active{background:#fff;border-color:var(--ink);box-shadow:var(--shadow);}
+.stage-card .stage-top{display:flex;align-items:center;gap:10px;}
+.stage-card .stage-chip{
+  width:22px;height:22px;border-radius:999px;background:var(--paper-200);color:var(--ink-soft);
+  font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.stage-card.active .stage-chip{background:var(--ink);color:var(--paper-50);}
+.stage-card .stage-title{font-size:14px;font-weight:700;color:var(--ink);}
+.stage-card .stage-num{font-size:34px;font-weight:700;line-height:1;}
+.stage-card .stage-sub{font-size:12.5px;color:var(--ink-soft);}
+
+.workspace{display:flex;gap:18px;align-items:flex-start;}
+.list-panel{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px;}
+.list-panel-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.list-title{font-size:15px;}
+.raw-select{padding:9px 12px;border:1px solid var(--line);border-radius:12px;background:#fff;font-size:13px;font-family:inherit;color:var(--ink);}
+
+.cust-list-card{background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;}
+.cust-list-head{
+  display:flex;align-items:center;gap:14px;padding:11px 18px;background:var(--paper-100);
+  border-bottom:1px solid var(--line);font-size:11.5px;font-weight:700;color:var(--ink-soft);letter-spacing:.02em;
+}
+.cust-list-foot{padding:12px 18px;font-size:12px;color:var(--ink-soft);display:flex;justify-content:space-between;}
+.cust-row{
+  display:flex;align-items:center;gap:14px;padding:13px 18px;border-bottom:1px solid var(--paper-100);
+  cursor:pointer;border-left:3px solid transparent;
+}
+.cust-row:hover{background:var(--paper-50);}
+.cust-row.active{background:var(--paper-100);border-left-color:var(--ink);}
+
+.detail-panel{width:400px;flex-shrink:0;display:flex;flex-direction:column;gap:14px;}
+.detail-card{background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 6px 20px rgba(43,33,23,.08);overflow:hidden;}
+.detail-empty{background:#fff;border:1.5px dashed var(--line);border-radius:16px;padding:22px;text-align:center;color:var(--ink-soft);font-size:13px;}
+.detail-head{padding:16px 18px;border-bottom:1px solid var(--paper-100);}
+.detail-body{padding:16px 18px;display:flex;flex-direction:column;gap:14px;}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.detail-grid-cell{border:1px solid var(--line);border-radius:12px;padding:11px 13px;}
+.detail-items-box{border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+.detail-item-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--paper-100);}
+.detail-actions{display:flex;gap:7px;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--paper-100);}
+
+.tray-card{background:#fff;border:1.5px solid var(--green-export);border-radius:16px;overflow:hidden;box-shadow:0 6px 20px rgba(43,33,23,.08);}
+.tray-head{padding:14px 18px;background:var(--green-ok-bg);border-bottom:1px solid #cbe7d3;display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.tray-title{font-size:15px;font-weight:700;color:var(--green-export);}
+.tray-count{font-size:26px;font-weight:700;line-height:1;color:var(--green-export);}
+.tray-list{padding:8px 10px;display:flex;flex-direction:column;gap:2px;max-height:220px;overflow:auto;}
+.tray-row{display:flex;align-items:center;gap:10px;padding:8px 8px;border-radius:10px;}
+.tray-row:hover{background:var(--paper-50);}
+.tray-foot{padding:13px 18px;border-top:1px solid var(--paper-100);background:var(--paper-50);display:flex;flex-direction:column;gap:9px;}
+.tray-total{display:flex;justify-content:space-between;}
+.tray-export-btn{border:1px solid var(--green-export);background:var(--green-export);color:#fff;padding:11px 14px;border-radius:12px;font-size:14px;font-weight:700;width:100%;}
+.tray-export-btn:disabled{background:#fff;color:var(--green-export);opacity:.5;cursor:not-allowed;}
+
 /* 三點選單 */
 .row-menu{
   position:fixed;display:none;flex-direction:column;min-width:172px;
@@ -325,6 +387,8 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
   .map-grid{grid-template-columns:1fr;}
   .shell{padding:18px 14px 60px;}
   td.actions{white-space:normal;}
+  .workspace{flex-direction:column;}
+  .detail-panel{width:100%;}
 }
 </style>
 </head>
@@ -341,6 +405,13 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
         <p>匯入客戶原始報價單 → 轉換為標準匯入格式並匯出</p>
       </div>
     </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost" id="btnResetAll">重置本期匯出狀態</button>
+      <button class="btn btn-ghost" id="btnMasterItemsTop" style="display:none;">品項主檔 <span id="masterItemsCountTop" class="mono">0</span> 筆</button>
+      <button class="btn btn-secondary" id="btnBatchImport">批次匯入客戶</button>
+      <button class="btn btn-secondary" id="btnBatchQuotes">批次匯入報價單</button>
+      <button class="btn btn-primary" id="btnAddCustomer">＋ 新增客戶</button>
+    </div>
   </div>
 
   <div class="tab-row" id="tabRow">
@@ -356,35 +427,58 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
     <button class="btn btn-secondary" id="btnMasterItems">上傳／更新主檔</button>
   </div>
 
-  <div class="stat-row" id="statCards">
-    <div class="stat-card active" data-filter="all"><span class="n mono">0</span><span class="l">客戶總數</span></div>
-    <div class="stat-card" data-filter="exported"><span class="n mono" style="color:var(--green-ok);">0</span><span class="l">已匯出</span></div>
-    <div class="stat-card" data-filter="notExported"><span class="n mono" style="color:var(--red-bad);">0</span><span class="l">尚未匯出</span></div>
-    <div class="stat-card" data-filter="notConfigured"><span class="n mono" style="color:var(--red-bad);">0</span><span class="l">尚未設定</span></div>
-  </div>
+  <div class="stage-row" id="stageRow"></div>
 
-  <div class="toolbar">
-    <div class="search-box">
-      <input type="text" id="searchInput" placeholder="搜尋客戶代號或名稱…">
+  <div class="workspace">
+    <div class="list-panel">
+      <div class="list-panel-head">
+        <strong id="listTitle" class="list-title"></strong>
+        <span id="listHint" class="hint"></span>
+        <div style="flex:1;"></div>
+        <div class="search-box" style="width:240px;">
+          <input type="text" id="searchInput" placeholder="搜尋客戶代號或名稱…">
+        </div>
+        <select id="cycleFilterSelect" class="raw-select">
+          <option value="all">全部報價週期</option>
+          <option value="7天">7天</option>
+          <option value="10天">10天</option>
+          <option value="15天">15天</option>
+          <option value="30天">30天</option>
+        </select>
+      </div>
+      <div class="cust-list-card">
+        <div class="cust-list-head" id="custListHead"></div>
+        <div id="custListBody"></div>
+        <div class="cust-list-foot" id="custListFoot"></div>
+      </div>
+      <div class="empty-state" id="emptyState" style="display:none;">
+        <div class="glyph">📋</div>
+        <h3>還沒有客戶資料</h3>
+        <p>請先「新增客戶」或「批次匯入客戶」建立客戶主檔</p>
+      </div>
     </div>
-    <button class="btn btn-ghost" id="btnResetAll">重置本期匯出狀態</button>
-    <button class="btn btn-secondary" id="btnBatchImport">批次匯入客戶</button>
-    <button class="btn btn-secondary" id="btnBatchQuotes">批次匯入報價單</button>
-    <button class="btn btn-secondary" id="btnAddCustomer">＋ 新增客戶</button>
-    <button class="btn btn-secondary" id="btnBatchEdit" disabled>批次修改</button>
-    <button class="btn btn-danger-outline" id="btnBatchDelete" disabled>批次刪除</button>
-    <button class="btn btn-export" id="btnBatchExport" disabled>批次匯出</button>
-  </div>
 
-  <div class="table-wrap">
-    <table id="custTable">
-      <thead id="tableHead"></thead>
-      <tbody id="custTbody"></tbody>
-    </table>
-    <div class="empty-state" id="emptyState" style="display:none;">
-      <div class="glyph">📋</div>
-      <h3>還沒有客戶資料</h3>
-      <p>請先「新增客戶」或「批次匯入客戶」建立客戶主檔</p>
+    <div class="detail-panel">
+      <div id="detailCard"></div>
+      <div class="tray-card">
+        <div class="tray-head">
+          <div>
+            <div class="tray-title">本期匯出清單</div>
+            <div class="hint" style="margin-top:2px;">勾選的客戶會合併成一份匯入檔</div>
+          </div>
+          <span class="tray-count" id="trayCount">0</span>
+        </div>
+        <div class="tray-list" id="trayList"></div>
+        <div class="tray-foot">
+          <div class="tray-total hint">合計品項<strong class="mono" id="trayItemsTotal">0 項</strong></div>
+          <button class="btn tray-export-btn" id="btnBatchExport" disabled>匯出並標記已匯出</button>
+          <div style="display:flex;gap:7px;">
+            <button class="btn btn-secondary" style="flex:1;" id="btnBatchEdit" disabled>批次修改</button>
+            <button class="btn btn-danger-outline" style="flex:1;" id="btnBatchDelete" disabled>批次刪除</button>
+            <button class="btn btn-secondary" style="flex:1;" id="btnClearTray">清空清單</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   <div style="text-align:right;margin-top:10px;font-size:11px;color:var(--ink-soft);" class="mono">前端版本 <span id="frontendVersionStamp"></span></div>
@@ -723,6 +817,6 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-17-supabase-v14"></script>
+<script src="app.js?v=2026-09-18-supabase-v15"></script>
 </body>
 </html>
