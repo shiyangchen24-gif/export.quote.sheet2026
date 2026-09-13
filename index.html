@@ -688,8 +688,9 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
       <!-- Step 1: 上傳檔案 -->
       <div class="wiz-panel" data-panel="1">
         <div class="dropzone" id="wizDropzone">
-          <strong>點擊選擇檔案</strong> 或拖曳客戶原始報價單到此處<br>支援 .xlsx / .xls
-          <input type="file" id="wizFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
+          <strong>點擊選擇檔案</strong> 或拖曳客戶原始報價單到此處<br>支援 .xlsx / .xls，可一次選取多個檔案
+          <div class="hint" style="color:var(--rust-600);font-weight:600;margin-top:6px;">單一客戶上傳報價單時，多筆報價單格式必須相同（欄位順序、起始列都要一樣）</div>
+          <input type="file" id="wizFileInput" accept=".xlsx,.xls,.csv" multiple style="display:none;">
         </div>
       </div>
 
@@ -722,6 +723,6 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-16-supabase-v13"></script>
+<script src="app.js?v=2026-09-17-supabase-v14"></script>
 </body>
 </html>
