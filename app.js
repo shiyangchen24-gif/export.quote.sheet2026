@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-18-supabase-v15';
+const FRONTEND_VERSION = '2026-09-19-supabase-v16';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -125,7 +125,7 @@ let state = {
 /* ---------------- 資料列轉換：Supabase 的 snake_case 欄位 → 前端慣用的 camelCase ---------------- */
 // 客戶清單查詢共用的欄位（不含 last_item_codes/item_code_lookup/quoted_prices 這幾個可能較大的欄位，
 // 那些只有真的要用時才單獨查，見 fetchPreviousCodes／fetchItemCodeLookup／fetchQuotedPrices）
-const CUSTOMER_SELECT_COLS = 'code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count,quoted_prices_count,last_quote_upload_time,saved_records_count,notes,unit_category';
+const CUSTOMER_SELECT_COLS = 'code,name,quote_cycle,trade_status,export_status,last_export_time,last_export_filename,mapping,product_code_mode,last_export_item_count,item_code_lookup_count,quoted_prices_count,last_quote_upload_time,saved_records_count,notes,unit_category,quote_file_location';
 
 function rowToCustomer(row) {
   return {
@@ -144,7 +144,8 @@ function rowToCustomer(row) {
     lastQuoteUploadTime: row.last_quote_upload_time || '',
     savedRecordsCount: row.saved_records_count || 0,
     notes: row.notes || '',
-    unitCategory: row.unit_category || ''
+    unitCategory: row.unit_category || '',
+    quoteFileLocation: row.quote_file_location || ''
   };
 }
 
@@ -187,10 +188,19 @@ function setupRealtime() {
 }
 
 /* ---------------- 共用 UI 工具 ---------------- */
-function setLoading(on, text) {
+function setLoading(on, text, progress) {
   const ov = document.getElementById('loadingOverlay');
   if (text) document.getElementById('loadingText').textContent = text;
   ov.classList.toggle('open', !!on);
+  const wrap = document.getElementById('loadingProgressWrap');
+  const bar = document.getElementById('loadingProgressBar');
+  if (on && typeof progress === 'number' && Number.isFinite(progress)) {
+    wrap.style.display = 'block';
+    bar.style.width = Math.max(0, Math.min(1, progress)) * 100 + '%';
+  } else {
+    wrap.style.display = 'none';
+    bar.style.width = '0%';
+  }
 }
 function toast(kind, msg) {
   const wrap = document.getElementById('toastWrap');
@@ -728,6 +738,9 @@ const STAGE_DEFS = [
   { key: 'pending', step: '2', title: '待上傳報價單', sub: '家' },
   { key: 'ready', step: '3', title: '可批次匯出', sub: '家 · 已暫存品項' }
 ];
+// 只有無貨號客戶頁籤才會顯示：這張卡跟上面三張的「格式/上傳/匯出」進度軸是獨立的另一條軸線
+// （料號對照表是不是設定好了），同一個客戶完全可能同時出現在這張卡跟上面某張卡裡
+const LOOKUP_STAGE_DEF = { key: 'needsLookup', step: '🔗', title: '待設定料號對照表', sub: '家 · 尚未建立客戶品名→忠欣料號對照' };
 
 function renderStats() { renderStageCards(); }
 
@@ -736,20 +749,25 @@ function renderStageCards() {
   const inTab = state.customers.filter(c => c.productCodeMode === wantMode);
   const counts = { setup: 0, pending: 0, ready: 0 };
   let overdueN = 0;
+  let needsLookupN = 0;
   inTab.forEach(c => {
     counts[computeStage(c)]++;
     if (computeDueInfo(c).state === 'overdue') overdueN++;
+    if (!(c.itemCodeLookupCount > 0)) needsLookupN++;
   });
   const el = document.getElementById('stageRow');
   if (!el) return;
-  el.innerHTML = STAGE_DEFS.map(s => {
+  let defs = STAGE_DEFS;
+  if (wantMode === '無貨號') defs = STAGE_DEFS.concat([LOOKUP_STAGE_DEF]);
+  el.innerHTML = defs.map(s => {
     const on = s.key === state.stageFilter;
+    const count = s.key === 'needsLookup' ? needsLookupN : counts[s.key];
     const sub = (s.key === 'pending' && overdueN > 0) ? `家 · 其中 ${overdueN} 家已逾期` : s.sub;
-    const numFg = s.key === 'pending' ? 'var(--red-bad)' : (s.key === 'ready' ? 'var(--green-ok)' : 'var(--ink-soft)');
+    const numFg = s.key === 'pending' ? 'var(--red-bad)' : (s.key === 'ready' ? 'var(--green-ok)' : (s.key === 'needsLookup' ? 'var(--red-bad)' : 'var(--ink-soft)'));
     return `<button class="stage-card${on ? ' active' : ''}" data-stage="${s.key}">
       <div class="stage-top"><span class="stage-chip">${s.step}</span><span class="stage-title">${s.title}</span></div>
       <div style="display:flex;align-items:baseline;gap:9px;margin-top:10px;">
-        <span class="stage-num" style="color:${numFg};">${counts[s.key]}</span>
+        <span class="stage-num" style="color:${numFg};">${count}</span>
         <span class="hint">${sub}</span>
       </div>
     </button>`;
@@ -761,7 +779,9 @@ function filteredCustomers() {
   const wantMode = state.activeTab === 'noCode' ? '無貨號' : '有貨號';
   return state.customers.filter(c => {
     if (c.productCodeMode !== wantMode) return false;
-    if (computeStage(c) !== state.stageFilter) return false;
+    if (state.stageFilter === 'needsLookup') {
+      if (c.itemCodeLookupCount > 0) return false;
+    } else if (computeStage(c) !== state.stageFilter) return false;
     if (state.cycleFilter !== 'all' && c.quoteCycle !== state.cycleFilter) return false;
     if (kw && !(String(c.code).toLowerCase().includes(kw) || String(c.name).toLowerCase().includes(kw))) return false;
     return true;
@@ -783,11 +803,12 @@ function renderCustomerList() {
   const head = document.getElementById('custListHead');
   const body = document.getElementById('custListBody');
   const foot = document.getElementById('custListFoot');
-  const titles = { setup: '① 待設定匯出格式', pending: '② 待上傳報價單', ready: '③ 可批次匯出' };
+  const titles = { setup: '① 待設定匯出格式', pending: '② 待上傳報價單', ready: '③ 可批次匯出', needsLookup: '🔗 待設定料號對照表' };
   const hints = {
     setup: '第一次上傳報價單時設定欄位對應，之後自動套用',
     pending: '格式已設定好，把這期的報價單丟進來就會自動解析',
-    ready: '已解析並暫存品項，勾選後合併成一份匯入檔'
+    ready: '已解析並暫存品項，勾選後合併成一份匯入檔',
+    needsLookup: '這些客戶還沒建立「客戶品名 → 忠欣料號」對照表，上傳報價單時會全部比對不到料號'
   };
   document.getElementById('listTitle').textContent = titles[state.stageFilter];
   document.getElementById('listHint').textContent = hints[state.stageFilter];
@@ -833,7 +854,7 @@ function renderCustomerList() {
       </div>`;
     }).join('');
   }
-  foot.innerHTML = `<span>顯示 ${list.length} / ${allInTab.filter(c => computeStage(c) === state.stageFilter).length} 家（共 ${totalInTab} 家${wantMode}客戶）</span><span class="mono">前端版本 ${FRONTEND_VERSION}</span>`;
+  foot.innerHTML = `<span>顯示 ${list.length} / ${allInTab.filter(c => state.stageFilter === 'needsLookup' ? !(c.itemCodeLookupCount > 0) : computeStage(c) === state.stageFilter).length} 家（共 ${totalInTab} 家${wantMode}客戶）</span><span class="mono">前端版本 ${FRONTEND_VERSION}</span>`;
   syncSelectAllCheckbox();
 }
 
@@ -897,6 +918,13 @@ function renderDetailPanel() {
               <button class="text-link" data-act="lookup" data-code="${escapeHtml(customer.code)}" style="margin:0;padding:2px 4px;">${lookupCount > 0 ? '管理對照' : '設定'}</button>
             </div>
           </div>` : ''}
+          <div class="detail-grid-cell" style="grid-column:1 / -1;">
+            <div class="hint" style="font-weight:600;">報價單檔案位置</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px;">
+              <span style="font-size:12.5px;color:${customer.quoteFileLocation ? 'var(--ink)' : 'var(--ink-soft)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;" title="${escapeHtml(customer.quoteFileLocation)}">${customer.quoteFileLocation ? escapeHtml(customer.quoteFileLocation) : '尚未填寫'}</span>
+              ${customer.quoteFileLocation ? `<button class="text-link" data-act="copyloc" data-code="${escapeHtml(customer.code)}" style="margin:0;padding:2px 4px;flex-shrink:0;">複製</button>` : `<button class="text-link" data-act="edit" data-code="${escapeHtml(customer.code)}" style="margin:0;padding:2px 4px;flex-shrink:0;">填寫</button>`}
+            </div>
+          </div>
         </div>
         <div>
           <div class="hint" style="font-weight:700;margin-bottom:7px;">本次暫存品項${stagedCount ? `（${stagedCount} 項）` : ''}</div>
@@ -1027,10 +1055,24 @@ document.getElementById('detailCard').addEventListener('click', e => {
     else if (act === 'delete') deleteCustomerSingle(customer);
     else if (act === 'lookup') openLookupWizard(customer);
     else if (act === 'unexport') unexportCustomer(customer);
+    else if (act === 'copyloc') copyQuoteFileLocation(customer);
   } catch (err) {
     toast('err', '操作失敗，頁面可能不是最新版本，請重新整理或確認部署檔案是否為最新：' + err.message);
   }
 });
+
+function copyQuoteFileLocation(customer) {
+  const text = customer.quoteFileLocation || '';
+  if (!text) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => toast('ok', '已複製報價單檔案位置'),
+      () => toast('err', '複製失敗，請手動選取文字複製')
+    );
+  } else {
+    toast('err', '這個瀏覽器不支援自動複製，請手動選取文字複製');
+  }
+}
 
 // 本期匯出清單裡的 ✕：把這個客戶從勾選清單移除
 document.getElementById('trayList').addEventListener('click', e => {
@@ -1181,18 +1223,20 @@ document.getElementById('btnBatchExport').addEventListener('click', async () => 
     let outName;
     if (noCode) {
       if (!state.masterItems.length) await loadMasterItems();
-      setLoading(true, `讀取已儲存的報價資料…（${ready.length} 家客戶）`);
       const customersWithData = [];
-      for (const c of ready) {
+      for (let i = 0; i < ready.length; i++) {
+        const c = ready[i];
+        setLoading(true, `讀取已儲存的報價資料…（${i + 1}/${ready.length}：${c.code}）`, (i + 1) / ready.length);
         const prices = await fetchQuotedPrices(c.code);
         customersWithData.push({ customer: c, matched: prices.matched, unmatched: prices.unmatched });
       }
       setLoading(true, '產生合併匯出檔案…');
       outName = await exportNoCodeBatchWorkbook(customersWithData, state.masterItems);
     } else {
-      setLoading(true, `讀取已儲存的報價資料…（${ready.length} 家客戶）`);
       const customersWithRecords = [];
-      for (const c of ready) {
+      for (let i = 0; i < ready.length; i++) {
+        const c = ready[i];
+        setLoading(true, `讀取已儲存的報價資料…（${i + 1}/${ready.length}：${c.code}）`, (i + 1) / ready.length);
         const records = await fetchSavedRecords(c.code);
         customersWithRecords.push({ customer: c, records });
       }
@@ -1280,6 +1324,7 @@ function openHistoryModal(customer) {
     ['客戶代號', customer.code],
     ['客戶名稱', customer.name || '—'],
     ['備註', customer.notes || '—'],
+    ['報價單檔案位置', customer.quoteFileLocation || '—'],
     ['報價種類', customer.productCodeMode],
     ['報價週期', customer.quoteCycle],
     ['匯出格式', customer.mapping ? '已設定' : '尚未設定'],
@@ -1537,6 +1582,7 @@ function openCustomerModal(customer) {
   setVal('custExportStatus', customer ? (customer.exportStatus === '已匯出' ? '已匯出' : '未匯出') : '未匯出');
   setVal('custUnitCategory', customer ? (customer.unitCategory || '') : '');
   setVal('custNotes', customer ? (customer.notes || '') : '');
+  setVal('custQuoteFileLocation', customer ? (customer.quoteFileLocation || '') : '');
   toggleUnitCategoryField();
   openModal('ovCustomer');
 }
@@ -1564,6 +1610,7 @@ async function saveCustomerToBackend(payload) {
     quote_cycle: ['7天', '10天', '15天', '30天'].includes(payload.quoteCycle) ? payload.quoteCycle : '7天',
     unit_category: ['kg', '台斤'].includes(payload.unitCategory) ? payload.unitCategory : '',
     notes: payload.notes || '',
+    quote_file_location: payload.quoteFileLocation || '',
     updated_at: nowIso
   };
   if (!existing) {
@@ -1595,7 +1642,8 @@ document.getElementById('btnSaveCustomer').addEventListener('click', async () =>
       quoteCycle: document.getElementById('custQuoteCycle').value,
       exportStatus: document.getElementById('custExportStatus').value,
       unitCategory: document.getElementById('custUnitCategory').value,
-      notes: document.getElementById('custNotes').value.trim()
+      notes: document.getElementById('custNotes').value.trim(),
+      quoteFileLocation: document.getElementById('custQuoteFileLocation').value.trim()
     });
     upsertCustomer(customer);
     closeModal('ovCustomer');
@@ -1728,6 +1776,7 @@ document.getElementById('btnBatchQuotes').addEventListener('click', () => {
   batchQuotesFiles = [];
   document.getElementById('batchQuotesPreviewWrap').style.display = 'none';
   document.getElementById('batchQuotesProgressWrap').style.display = 'none';
+  document.getElementById('batchQuotesProgressBar').style.width = '0%';
   document.getElementById('batchQuotesFileInput').value = '';
   document.getElementById('batchQuotesFolderInput').value = '';
   document.getElementById('btnConfirmBatchQuotes').disabled = true;
@@ -1800,6 +1849,7 @@ document.getElementById('btnConfirmBatchQuotes').addEventListener('click', async
     for (let i = 0; i < jobs.length; i++) {
       const job = jobs[i];
       document.getElementById('batchQuotesProgress').textContent = `處理中 ${i + 1}/${jobs.length}：${job.customer.code} ${job.customer.name || ''}`;
+      document.getElementById('batchQuotesProgressBar').style.width = ((i + 1) / jobs.length * 100) + '%';
       try {
         const { rows, hiddenCount } = await readWorkbookRaw(job.file);
         totalHidden += hiddenCount || 0;
@@ -1843,7 +1893,7 @@ function colLetter(i) {
 }
 
 function openWizard(customer) {
-  state.wizard = { customer, rawRowsList: [], dataStartRowIdx: null, columnMap: {}, numCols: 0, convertedRecords: [], step: 1, usingSaved: false, fileNames: [], previousCodes: [], itemCodeLookup: [], isFirstEverExport: true };
+  state.wizard = { customer, rawRowsList: [], dataStartRowIdx: null, columnMap: {}, numCols: 0, convertedRecords: [], step: 1, usingSaved: false, fileNames: [], previousCodes: [], itemCodeLookup: [], isFirstEverExport: true, manualLookupOverrides: [] };
   const noCode = customer.productCodeMode === '無貨號';
   document.getElementById('wizardTitle').textContent = `上傳報價單 － ${customer.code} ${customer.name || ''}`;
   document.getElementById('wizardSub').textContent = customer.mapping
@@ -2043,13 +2093,20 @@ function renderResultStep() {
   if (customer.productCodeMode === '無貨號') {
     // 無貨號客戶的正式匯出檔是整份忠欣品項主檔（幾千列），這裡的預覽改成只顯示「這次客戶自己報了哪些品項」
     // 以及有沒有比對到忠欣品項代號，不逐列預覽最終檔案本身（那樣會有幾千列，瀏覽器跟人眼都吃不消）。
+    // 比對不到的品項：直接在這裡打忠欣料號手動補上，不用先跳去「料號對照表」設定好才能再重新上傳一次。
     const thead = '<thead><tr><th>客戶品項名稱</th><th>比對結果（忠欣品項代號）</th><th>單價</th></tr></thead>';
-    const body = '<tbody>' + recs.map(rec => {
-      const matchCell = rec._unmatched ? '未比對到' : escapeHtml(rec['貨號']);
+    const body = '<tbody>' + recs.map((rec, idx) => {
       const rowCls = rec._unmatched ? 'unmatched-row' : (rec._isNew ? 'new-item-row' : '');
+      const matchCell = rec._unmatched
+        ? `<input type="text" class="manualLookupInput" data-row-idx="${idx}" list="masterItemsDatalist" placeholder="輸入忠欣料號" style="width:120px;padding:4px 7px;border:1px solid var(--rust-600);border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;">`
+        : escapeHtml(rec['貨號']);
       return `<tr class="${rowCls}"><td>${escapeHtml(rec['品名'])}</td><td class="mono">${matchCell}</td><td>${escapeHtml(rec['單價'])}</td></tr>`;
     }).join('') + '</tbody>';
     table.innerHTML = thead + body;
+    populateMasterItemsDatalist();
+    table.querySelectorAll('.manualLookupInput').forEach(input => {
+      input.addEventListener('change', () => applyManualLookup(+input.getAttribute('data-row-idx'), input.value.trim()));
+    });
     return;
   }
 
@@ -2116,6 +2173,25 @@ async function saveMappingForCustomer() {
   } catch (err) { /* 靜默失敗，不影響匯出流程 */ }
 }
 
+function applyManualLookup(rowIdx, code) {
+  const rec = state.wizard.convertedRecords[rowIdx];
+  if (!rec) return;
+  if (!code) { toast('err', '請輸入忠欣料號'); return; }
+  const master = state.masterItems.find(m => m.itemCode === code);
+  if (!master) { toast('err', `找不到料號「${code}」，請確認忠欣品項主檔裡有這個代號`); return; }
+  rec['貨號'] = code;
+  rec._unmatched = false;
+  if (!rec['單位']) rec['單位'] = master.unit;
+  // 記住這次手動補上的對照，儲存報價時會一併寫進這個客戶的料號對照表，下次上傳就能自動比對到
+  const custName = rec['品名'];
+  const overrides = state.wizard.manualLookupOverrides;
+  const existingIdx = overrides.findIndex(x => x.name === custName);
+  const entry = { name: custName, code, itemName: master.itemName };
+  if (existingIdx > -1) overrides[existingIdx] = entry; else overrides.push(entry);
+  toast('ok', `已將「${custName}」對應到 ${code}（${master.itemName}），儲存報價時會一併加入料號對照表`);
+  renderResultStep();
+}
+
 document.getElementById('wizExport').addEventListener('click', async () => {
   const { customer, convertedRecords } = state.wizard;
   if (!convertedRecords.length) return;
@@ -2126,9 +2202,21 @@ document.getElementById('wizExport').addEventListener('click', async () => {
     const saveFn = customer.productCodeMode === '無貨號' ? saveQuotedPrices : saveHasCodeRecords;
     const res = await saveFn(customer, convertedRecords);
     if (!res.ok) throw new Error(res.error || '儲存失敗');
-    upsertCustomer(res.customer);
+    let finalCustomer = res.customer;
+    // 精靈第3步手動補上的料號對照（原本比對不到、使用者直接打上忠欣料號的），
+    // 這裡一併合併進這個客戶的料號對照表，下次上傳同樣的品名就能自動比對到，不用每次都手動補
+    const overrides = state.wizard.manualLookupOverrides;
+    if (overrides && overrides.length) {
+      const existingLookup = await fetchItemCodeLookup(customer.code);
+      overrides.forEach(entry => {
+        const idx = existingLookup.findIndex(x => x.name === entry.name);
+        if (idx > -1) existingLookup[idx] = entry; else existingLookup.push(entry);
+      });
+      finalCustomer = await saveItemCodeLookup(customer.code, existingLookup);
+    }
+    upsertCustomer(finalCustomer);
     closeModal('ovWizard');
-    toast('ok', `已儲存 ${customer.code} 的報價，共 ${convertedRecords.length} 項。之後可在客戶列表勾選需要的客戶，點「批次匯出」合併匯出。`);
+    toast('ok', `已儲存 ${customer.code} 的報價，共 ${convertedRecords.length} 項${overrides && overrides.length ? `，並補上 ${overrides.length} 筆料號對照` : ''}。之後可在客戶列表勾選需要的客戶，點「批次匯出」合併匯出。`);
   } catch (err) {
     toast('err', '儲存失敗：' + err.message);
   } finally {
