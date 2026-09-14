@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-19-supabase-v16';
+const FRONTEND_VERSION = '2026-09-20-supabase-v17';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -102,13 +102,6 @@ function computeDueInfo(c) {
   const now = new Date();
   return { state: now >= due ? 'overdue' : 'active', due };
 }
-// 匯出狀態徽章：二元顯示（已匯出/尚未匯出），never 與 overdue 都視為「尚未匯出」
-function computeExportBadge(c) {
-  const info = computeDueInfo(c);
-  if (info.state === 'active') return { label: '已匯出', cls: 'badge-green', due: info.due, overdue: false };
-  return { label: '尚未匯出', cls: 'badge-red', due: info.due, overdue: info.state === 'overdue' };
-}
-
 let state = {
   customers: [],
   activeTab: 'hasCode', // hasCode | noCode
@@ -149,16 +142,29 @@ function rowToCustomer(row) {
   };
 }
 
+// Supabase/PostgREST 預設每次查詢最多回傳 1000 筆（伺服器端安全上限，不是分頁功能關掉），
+// 超過的資料會被悄悄截斷、不會報錯，所以像忠欣品項主檔這種可能上千筆的資料表，
+// 一定要用 .range() 分批撈完整份，不能只信任一次 select() 就拿到全部。
+async function fetchAllRows(tableName, selectCols, orderCol) {
+  const PAGE_SIZE = 1000;
+  let allRows = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await sb.from(tableName).select(selectCols).order(orderCol).range(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    allRows = allRows.concat(data || []);
+    if (!data || data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return allRows;
+}
+
 /* ---------------- API（Supabase：讀取） ---------------- */
 async function loadCustomers(showLoading) {
   if (showLoading) setLoading(true, '載入客戶資料…');
   try {
     assertSb();
-    const { data, error } = await sb
-      .from('customers')
-      .select(CUSTOMER_SELECT_COLS)
-      .order('code');
-    if (error) throw new Error(error.message);
+    const data = await fetchAllRows('customers', CUSTOMER_SELECT_COLS, 'code');
     state.customers = (data || []).map(rowToCustomer);
     renderStageCards();
     renderCustomerList();
@@ -391,8 +397,7 @@ async function saveHasCodeRecords(customer, records) {
 async function loadMasterItems() {
   try {
     assertSb();
-    const { data, error } = await sb.from('master_items').select('item_code,item_name,unit,spec_code,grade').order('item_code');
-    if (error) throw new Error(error.message);
+    const data = await fetchAllRows('master_items', 'item_code,item_name,unit,spec_code,grade', 'item_code');
     state.masterItems = (data || []).map(r => ({ itemCode: r.item_code, itemName: r.item_name || '', unit: r.unit || '', specCode: r.spec_code || '', grade: r.grade || '' }));
     const countEl = document.getElementById('masterItemsCount');
     if (countEl) countEl.textContent = state.masterItems.length;
@@ -709,22 +714,6 @@ async function exportNoCodeBatchWorkbook(customersWithData, masterItems) {
 }
 
 
-// Supabase 的 jsonb 欄位沒有 GAS 網址長度那種限制，一次寫入即可，不用再分批。
-async function persistExportResult(customer, records, outName) {
-  assertSb();
-  const codes = records.map(r => getDiffKey(r, customer.productCodeMode)).filter(Boolean);
-  const { data, error } = await sb.from('customers').update({
-    export_status: '已匯出',
-    last_export_time: new Date().toISOString(),
-    last_export_filename: outName,
-    last_export_item_count: records.length,
-    last_item_codes: codes,
-    updated_at: new Date().toISOString()
-  }).eq('code', customer.code).select().single();
-  if (error) return { ok: false, error: error.message };
-  return { ok: true, customer: rowToCustomer(data) };
-}
-
 /* ---------------- 統計與表格渲染 ---------------- */
 // 三階段分類（取代原本用統計卡做的 全部/已匯出/尚未匯出/尚未設定 篩選）：
 // setup=還沒設定欄位對應；pending=格式設好了但這期還沒上傳報價單暫存任何品項；ready=已暫存品項、可以批次匯出
@@ -741,8 +730,6 @@ const STAGE_DEFS = [
 // 只有無貨號客戶頁籤才會顯示：這張卡跟上面三張的「格式/上傳/匯出」進度軸是獨立的另一條軸線
 // （料號對照表是不是設定好了），同一個客戶完全可能同時出現在這張卡跟上面某張卡裡
 const LOOKUP_STAGE_DEF = { key: 'needsLookup', step: '🔗', title: '待設定料號對照表', sub: '家 · 尚未建立客戶品名→忠欣料號對照' };
-
-function renderStats() { renderStageCards(); }
 
 function renderStageCards() {
   const wantMode = state.activeTab === 'noCode' ? '無貨號' : '有貨號';
@@ -986,7 +973,6 @@ document.getElementById('tabRow').addEventListener('click', e => {
   renderCustomerList();
   renderDetailPanel();
   renderExportTray();
-  renderStats();
   if (tab === 'noCode' && !state.masterItems.length) loadMasterItems();
 });
 
