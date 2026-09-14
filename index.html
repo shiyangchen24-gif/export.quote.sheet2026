@@ -73,7 +73,7 @@ input,select{font-family:inherit;}
 .brand-mark h1{font-size:19px;font-weight:700;margin:0;letter-spacing:-.01em;}
 .brand-mark p{margin:2px 0 0;font-size:12.5px;color:var(--ink-soft);}
 
-/* 統計卡（可點擊篩選） */
+/* 頁籤 */
 .tab-row{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--line);}
 .tab-btn{
   border:none;background:transparent;padding:10px 4px;margin-right:18px;font-size:14px;font-weight:600;
@@ -82,19 +82,6 @@ input,select{font-family:inherit;}
 .tab-btn:hover{color:var(--ink);}
 .tab-btn.active{color:var(--leaf-700);border-bottom-color:var(--leaf-600);}
 
-.stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;}
-.stat-card{
-  background:#fff;border:1.5px solid var(--line);border-radius:10px;
-  padding:10px 18px;min-width:96px;text-align:center;cursor:pointer;
-  transition:border-color .12s, box-shadow .12s;
-}
-.stat-card:hover{border-color:var(--ink-soft);}
-.stat-card.active{border-color:var(--soil-900);box-shadow:0 0 0 2px rgba(31,36,25,.08);}
-.stat-card .n{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:19px;display:block;line-height:1.1;}
-.stat-card .l{font-size:11px;color:var(--ink-soft);margin-top:3px;display:block;}
-
-/* toolbar */
-.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;}
 .search-box{flex:1;min-width:180px;position:relative;}
 .search-box input{
   width:100%;padding:9px 12px 9px 34px;border:1px solid var(--line);border-radius:8px;
@@ -109,14 +96,6 @@ input,select{font-family:inherit;}
   content:"";position:absolute;left:20.5px;top:calc(50% + 5px);
   width:6px;height:1.6px;background:var(--ink-soft);transform:rotate(45deg);
 }
-.select-filter{
-  padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px;color:var(--ink);
-}
-.row-menu label{
-  display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:13px;color:var(--ink);border-radius:7px;cursor:pointer;
-}
-.row-menu label:hover{background:var(--paper-100);}
-.row-menu label input{margin:0;}
 
 .btn{
   border:1px solid var(--line);background:#fff;color:var(--ink);
@@ -155,35 +134,17 @@ input,select{font-family:inherit;}
 .btn-icon:hover{background:var(--paper-200);color:var(--ink);}
 .btn-icon:active:not(:disabled){transform:scale(.9);}
 
-/* table */
-.table-wrap{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:visible;box-shadow:var(--shadow);}
-#custTable{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;}
-#custTable td.code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-#custTable td.cust-name{white-space:normal;word-break:break-word;}
-#custTable td.actions{white-space:nowrap;} /* 操作欄已加寬，全部項目排在同一行，不再換行 */
+/* 通用表格樣式（各 Modal 裡的預覽表格仍在用：批次匯入預覽、精靈欄位對應預覽、料號對照表預覽等） */
 table{width:100%;border-collapse:collapse;font-size:13px;}
 thead th{
   text-align:left;padding:11px 14px;background:var(--paper-100);
   color:var(--ink-soft);font-weight:600;font-size:11.5px;letter-spacing:.02em;
   border-bottom:1px solid var(--line);white-space:nowrap;
 }
-.th-filter-btn{
-  display:inline-flex;align-items:center;justify-content:center;
-  width:18px;height:18px;padding:0;margin-left:3px;border:none;background:transparent;
-  color:var(--ink-soft);border-radius:5px;vertical-align:middle;
-}
-.th-filter-btn:hover{background:var(--paper-200);color:var(--ink);}
-.th-filter-btn.active{color:var(--leaf-600);background:var(--ok-100);}
 tbody td{padding:11px 14px;border-bottom:1px solid var(--paper-200);vertical-align:middle;}
 tbody tr:last-child td{border-bottom:none;}
 tbody tr{cursor:pointer;transition:background .1s;}
 tbody tr:hover{background:var(--paper-50);}
-tbody tr.row-selected{background:var(--ok-100);}
-tbody tr.row-selected:hover{background:#d3ecd0;}
-td.code{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--soil-900);}
-td.cust-name{font-size:15px;font-weight:600;}
-td.actions{text-align:left;position:relative;}
-td.actions .btn{margin-right:8px;vertical-align:middle;}
 .customer-note{
   display:inline-flex;align-items:center;
   color:#FF524D;font-size:11.5px;font-weight:600;font-family:inherit;
@@ -202,8 +163,6 @@ td.actions .btn{margin-right:8px;vertical-align:middle;}
 .text-link:active{transform:scale(.97);}
 .text-link.danger{color:var(--rust-600);}
 .text-link.danger:hover{background:var(--rust-100);color:var(--rust-600);}
-td.selcol,th.selcol{width:26px;padding-left:12px;padding-right:0;text-align:center;}
-td.selcol input, th.selcol input{width:14px;height:14px;cursor:pointer;}
 
 .badge{
   display:inline-flex;align-items:center;gap:5px;white-space:nowrap;
@@ -285,17 +244,12 @@ td.selcol input, th.selcol input{width:14px;height:14px;cursor:pointer;}
 .tray-export-btn:active:not(:disabled){transform:translateY(0) scale(.97);box-shadow:none;}
 .tray-export-btn:disabled{background:#fff;color:var(--green-export);opacity:.5;cursor:not-allowed;}
 
-/* 三點選單 */
+/* 定位式彈出視窗（目前只剩備註全文彈窗在用，欄位篩選 popover 已改用原生 select 移除了） */
 .row-menu{
   position:fixed;display:none;flex-direction:column;min-width:172px;
   background:#fff;border:1px solid var(--line);border-radius:10px;
   box-shadow:0 10px 30px rgba(22,26,20,.18);z-index:150;overflow:hidden;padding:4px;
 }
-.row-menu button{
-  text-align:left;border:none;background:transparent;padding:9px 12px;font-size:13px;color:var(--ink);border-radius:7px;
-}
-.row-menu button:hover{background:var(--paper-100);}
-.row-menu button.danger{color:var(--rust-600);}
 
 /* ---------- modal ---------- */
 .overlay{
@@ -496,10 +450,7 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
   <div style="text-align:right;margin-top:10px;font-size:11px;color:var(--ink-soft);" class="mono">前端版本 <span id="frontendVersionStamp"></span></div>
 </div>
 
-<!-- 欄位篩選選單（共用一個，動態定位與內容） -->
-<div class="row-menu" id="colFilterMenu"></div>
-
-<!-- 備註全文彈出視窗（共用一個，動態定位） -->
+<!-- 備註全文彈出視窗（動態定位） -->
 <div class="row-menu" id="noteFullTextPopover" style="max-width:320px;padding:12px 14px;white-space:normal;line-height:1.6;font-size:13px;color:var(--ink);"></div>
 
 <!-- ============ 新增/編輯客戶 Modal ============ -->
@@ -834,6 +785,6 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span><div class="loading-progress-wrap" id="loadingProgressWrap" style="display:none;"><div class="loading-progress-bar" id="loadingProgressBar"></div></div></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-19-supabase-v16"></script>
+<script src="app.js?v=2026-09-20-supabase-v17"></script>
 </body>
 </html>
