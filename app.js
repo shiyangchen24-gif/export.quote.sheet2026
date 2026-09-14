@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-21-supabase-v18';
+const FRONTEND_VERSION = '2026-09-22-supabase-v19';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -435,46 +435,68 @@ function getDiffKey(rec, productCodeMode) {
 
 // rawRowsList：一或多個檔案各自解析出來的二維陣列（單一客戶一次可以上傳多個檔案，
 // 只要這些檔案的欄位格式相同，就能套用同一組 dataStartRowIdx/columnMap 一次處理）
+// 有些客戶的報價單是「多欄並排的重複區塊」格式——同一張表裡橫向擺了好幾組（品名/單位/單價），
+// 不是單純一路往下的單一清單。這裡先把 columnMap 依照「識別欄位」（品名或貨號）出現的欄位順序
+// 切成好幾組，每組各自只包含自己那個區塊範圍內的欄位對應；一般只有一組的情況（欄位對應裡
+// 識別欄位只出現一次）跟原本行為完全一樣，不影響既有客戶。
+function splitColumnMapIntoGroups(columnMap, identityField) {
+  const sortedCols = Object.keys(columnMap).map(Number).sort((a, b) => a - b);
+  const groups = [];
+  let currentGroup = null;
+  sortedCols.forEach(colIdx => {
+    const field = columnMap[colIdx];
+    if (field === identityField || !currentGroup) {
+      currentGroup = {};
+      groups.push(currentGroup);
+    }
+    currentGroup[colIdx] = field;
+  });
+  return groups.length ? groups : [{}];
+}
+
 function buildConvertedRecords(rawRowsList, dataStartRowIdx, columnMap, productCodeMode, previousCodes, itemCodeLookup, masterItems) {
   const identityField = getIdentityField(productCodeMode);
   const prevSet = new Set(previousCodes || []);
   const noCode = productCodeMode === '無貨號';
   const lookupMap = new Map((itemCodeLookup || []).map(x => [x.name, x.code]));
   const masterMap = new Map((masterItems || []).map(m => [m.itemCode, m]));
+  const groups = splitColumnMapIntoGroups(columnMap, identityField);
   const recs = [];
   rawRowsList.forEach(rawRows => {
     for (let r = dataStartRowIdx; r < rawRows.length; r++) {
       const row = rawRows[r] || [];
       if (row.every(c => String(c == null ? '' : c).trim() === '')) continue;
-      const rec = {};
-      Object.keys(columnMap).forEach(idxStr => {
-        const idx = +idxStr, field = columnMap[idxStr];
-        let v = row[idx]; v = v == null ? '' : String(v).trim();
-        rec[field] = v;
-      });
-      if (!rec[identityField]) continue;
-      const priceWasZeroOrBlank = !rec['單價'] || !String(rec['單價']).trim() || String(rec['單價']).trim() === '0';
-      if (!rec['單價'] || !String(rec['單價']).trim()) rec['單價'] = '0'; // 無單價自動補0
-      // 有貨號客戶：只要有實際報價（單價不是 0），「不報價原因」一律清空，避免跟有報價的品項邏輯矛盾；
-      // 沒報價時（單價是 0 或空白）不自動補任何文字，單價是 0 已經足以表示沒報價，
-      // 不報價原因維持客戶檔案裡原本寫的內容（沒填就是空白）
-      if (!noCode && !priceWasZeroOrBlank) {
-        rec['不報價原因'] = '';
-      }
-      if (noCode) {
-        const matchedCode = lookupMap.get(rec['品名']);
-        if (matchedCode) {
-          rec['貨號'] = matchedCode;
-          rec._unmatched = false;
-          const master = masterMap.get(matchedCode);
-          if (master && !rec['單位']) rec['單位'] = master.unit; // 客戶沒填單位時，用忠欣官方單位補上
-        } else {
-          rec['貨號'] = '';
-          rec._unmatched = true;
+      groups.forEach(group => {
+        const rec = {};
+        Object.keys(group).forEach(idxStr => {
+          const idx = +idxStr, field = group[idxStr];
+          let v = row[idx]; v = v == null ? '' : String(v).trim();
+          rec[field] = v;
+        });
+        if (!rec[identityField]) return; // 這個區塊這一列沒有品名/貨號，跳過（常見於各區塊筆數不一致、尾端留白）
+        const priceWasZeroOrBlank = !rec['單價'] || !String(rec['單價']).trim() || String(rec['單價']).trim() === '0';
+        if (!rec['單價'] || !String(rec['單價']).trim()) rec['單價'] = '0'; // 無單價自動補0
+        // 有貨號客戶：只要有實際報價（單價不是 0），「不報價原因」一律清空，避免跟有報價的品項邏輯矛盾；
+        // 沒報價時（單價是 0 或空白）不自動補任何文字，單價是 0 已經足以表示沒報價，
+        // 不報價原因維持客戶檔案裡原本寫的內容（沒填就是空白）
+        if (!noCode && !priceWasZeroOrBlank) {
+          rec['不報價原因'] = '';
         }
-      }
-      rec._isNew = prevSet.size > 0 ? !prevSet.has(getDiffKey(rec, productCodeMode)) : false;
-      recs.push(rec);
+        if (noCode) {
+          const matchedCode = lookupMap.get(rec['品名']);
+          if (matchedCode) {
+            rec['貨號'] = matchedCode;
+            rec._unmatched = false;
+            const master = masterMap.get(matchedCode);
+            if (master && !rec['單位']) rec['單位'] = master.unit; // 客戶沒填單位時，用忠欣官方單位補上
+          } else {
+            rec['貨號'] = '';
+            rec._unmatched = true;
+          }
+        }
+        rec._isNew = prevSet.size > 0 ? !prevSet.has(getDiffKey(rec, productCodeMode)) : false;
+        recs.push(rec);
+      });
     }
   });
   // 排序：一般品項 → 新增品項(黃底) → 比對不到料號(橘底，最需要處理，排最後最顯眼)
@@ -1984,14 +2006,21 @@ function renderMappingStep() {
 
   if (!Object.keys(state.wizard.columnMap).length && headerGuessIdx >= 0) {
     const headerRow = rows[headerGuessIdx] || [];
+    const identityField = getIdentityField(state.wizard.customer.productCodeMode);
+    let prevField = null;
     headerRow.forEach((txt, idx) => {
-      const t = String(txt || '');
+      const t = String(txt || '').trim();
       let field = null;
       if (/貨號|品號|產品編號/.test(t)) field = '貨號';
       else if (/單價|價格|報價/.test(t)) field = '單價';
       else if (/單位/.test(t)) field = '單位';
       else if (/品名|規格|名稱/.test(t)) field = '品名';
+      // 有些客戶的報價單是橫向並排好幾組「品名/單價」的重複區塊格式，第二組以後的「單價」
+      // 表頭常常直接留空（沿用左邊那組的標題意思），所以緊接在識別欄位後面的空白表頭，
+      // 就先幫忙猜是單價，猜錯的話使用者在下面的欄位對應下拉選單裡改掉即可
+      if (!field && !t && prevField === identityField) field = '單價';
       if (field) state.wizard.columnMap[idx] = field;
+      prevField = field;
     });
   }
   renderMapPreviewTable();
