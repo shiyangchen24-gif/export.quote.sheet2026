@@ -758,7 +758,7 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 
       <!-- Step 2: 欄位對應 -->
       <div class="wiz-panel" data-panel="2" style="display:none;">
-        <p class="hint" style="margin-bottom:10px;">點選「資料從此列開始」標記第一筆品項所在的列，接著為每一欄指定對應的目標欄位。</p>
+        <p class="hint" style="margin-bottom:10px;">點選「資料從此列開始」標記第一筆品項所在的列，接著為每一欄指定對應的目標欄位。若同一張表橫向並排好幾組品名／單價（例如一列裡有好幾種商品並列），只要把每一組各自的欄位都指定好（可以重複指定同一種欄位給不同欄），系統會自動辨識成好幾組分開解析。</p>
         <div class="preview-scroll" id="wizMapPreviewWrap"><table id="wizMapPreviewTable"></table></div>
         <div class="map-grid" id="wizMapGrid" style="margin-top:16px;"></div>
         <div class="field" style="margin-top:14px;">
@@ -785,6 +785,6 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span><div class="loading-progress-wrap" id="loadingProgressWrap" style="display:none;"><div class="loading-progress-bar" id="loadingProgressBar"></div></div></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-21-supabase-v18"></script>
+<script src="app.js?v=2026-09-22-supabase-v19"></script>
 </body>
 </html>
