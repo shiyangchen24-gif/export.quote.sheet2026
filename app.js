@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-22-supabase-v19';
+const FRONTEND_VERSION = '2026-09-23-supabase-v20';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -631,12 +631,15 @@ async function exportNoCodeBatchWorkbook(customersWithData, masterItems) {
   const FONT_UNMATCHED = { name: FONT_NAME, size: FONT_SIZE, color: { argb: 'FFB35400' } };
   const FILL_NEW = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFDE5A' } };
   const FILL_UNMATCHED = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE6D1' } };
+  // 客戶指定的範本格式：A-E 欄（品項代號~等級，這幾欄是所有客戶共用的忠欣主檔部分）在表頭三列
+  // 要有淡藍底色，跟後面客戶各自的價格欄位（沒有底色）做區隔；不要更動這個顏色跟格線配置
+  const FILL_HEADER = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDEEBF7' } };
   const ALIGN_L = { horizontal: 'left', vertical: 'center' };
   const ALIGN_R = { horizontal: 'right', vertical: 'center' };
   const PRICE_FMT = '#,##0_);[Red](#,##0)';
   const N = customersWithData.length;
 
-  ws.columns = [{ width: 24 }, { width: 31 }, { width: 11 }, { width: 10 }, { width: 14 }]
+  ws.columns = [{ width: 23.875 }, { width: 31.125 }, { width: 11.375 }, { width: 9.625 }, { width: 14.125 }]
     .concat(customersWithData.map(() => ({ width: 18 })));
 
   // 每個客戶各自的「品項代號 → 比對結果」，之後逐列查比 O(1)
@@ -652,11 +655,13 @@ async function exportNoCodeBatchWorkbook(customersWithData, masterItems) {
     cell.font = FONT_NORMAL;
     cell.alignment = ALIGN_L;
     if (colNumber === 1 || colNumber > 5) cell.border = { top: THIN, bottom: THIN };
+    if (colNumber <= 5) cell.fill = FILL_HEADER;
   });
   for (let i = 0; i < N; i++) row1.getCell(6 + i).numFmt = '_-* #,##0_-;-* #,##0_-;_-* "-"??_-;_-@_-';
 
   // 第2列：每個客戶欄填自己的客戶代號
   const row2 = ws.addRow(['客戶代號/報價群組代號', '', '', '', ''].concat(customersWithData.map(cw => cw.customer.code)));
+  row2.eachCell({ includeEmpty: true }, (cell, colNumber) => { if (colNumber <= 5) cell.fill = FILL_HEADER; });
   row2.getCell(1).font = FONT_NORMAL; row2.getCell(1).alignment = ALIGN_L; row2.getCell(1).border = { bottom: THIN };
   for (let i = 0; i < N; i++) {
     const cell = row2.getCell(6 + i);
@@ -669,6 +674,7 @@ async function exportNoCodeBatchWorkbook(customersWithData, masterItems) {
     cell.font = FONT_NORMAL;
     cell.alignment = ALIGN_L;
     cell.border = colNumber === 5 ? { top: THIN, bottom: THIN, right: THIN } : { top: THIN, bottom: THIN };
+    if (colNumber <= 5) cell.fill = FILL_HEADER;
   });
   for (let i = 0; i < N; i++) row3.getCell(6 + i).numFmt = '@';
 
