@@ -122,31 +122,38 @@ input,select{font-family:inherit;}
   border:1px solid var(--line);background:#fff;color:var(--ink);
   padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;
   display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
-  transition:border-color .12s, background .12s, opacity .12s, transform .08s;
+  transition:border-color .14s, background .14s, opacity .14s, transform .1s, box-shadow .14s;
 }
 .btn:hover{border-color:var(--ink-soft);}
 .btn:active:not(:disabled){transform:scale(.96);}
+.btn:focus-visible{outline:2px solid var(--leaf-500);outline-offset:2px;}
 .btn-primary{background:var(--leaf-600);border-color:var(--leaf-600);color:#fff;}
-.btn-primary:hover{background:var(--leaf-700);border-color:var(--leaf-700);}
+.btn-primary:hover{background:var(--leaf-700);border-color:var(--leaf-700);box-shadow:0 3px 10px rgba(60,94,66,.28);transform:translateY(-1px);}
+.btn-primary:active:not(:disabled){transform:translateY(0) scale(.96);box-shadow:none;}
 .btn-dark{background:var(--soil-900);border-color:var(--soil-900);color:#fff;}
 .btn-dark:hover{background:#0f1209;}
 .btn-ghost{background:transparent;border-color:transparent;}
 .btn-ghost:hover{background:var(--paper-200);}
 .btn-secondary{background:#fff;border-color:var(--line);color:var(--ink);}
+.btn-secondary:hover{border-color:var(--ink-soft);background:var(--paper-50);}
 .btn-export{background:var(--green-export);border-color:var(--green-export);color:#fff;}
-.btn-export:hover{opacity:.9;}
+.btn-export:hover{background:#186633;border-color:#186633;box-shadow:0 3px 10px rgba(31,122,61,.3);transform:translateY(-1px);}
+.btn-export:active:not(:disabled){transform:translateY(0) scale(.96);box-shadow:none;}
 .btn-upload{background:var(--orange-action);border-color:var(--orange-action);color:#fff;}
-.btn-upload:hover{opacity:.9;}
+.btn-upload:hover{background:#e6752c;border-color:#e6752c;box-shadow:0 3px 10px rgba(255,134,55,.3);transform:translateY(-1px);}
+.btn-upload:active:not(:disabled){transform:translateY(0) scale(.96);box-shadow:none;}
 .btn-danger{color:var(--rust-600);}
 .btn-danger-outline{background:#fff;border-color:var(--rust-600);color:var(--rust-600);}
 .btn-danger-outline:hover{background:var(--rust-100);}
-.btn:disabled{opacity:.45;cursor:not-allowed;}
+.btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;transform:none;}
 .btn.small{padding:5px 10px;font-size:12px;border-radius:6px;}
 .btn-icon{
   width:30px;height:30px;padding:0;justify-content:center;border-radius:7px;
   border:1px solid var(--line);background:#fff;color:var(--ink-soft);font-size:16px;font-weight:700;
+  transition:background .14s,color .14s,transform .1s;
 }
 .btn-icon:hover{background:var(--paper-200);color:var(--ink);}
+.btn-icon:active:not(:disabled){transform:scale(.9);}
 
 /* table */
 .table-wrap{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:visible;box-shadow:var(--shadow);}
@@ -223,6 +230,7 @@ td.selcol input, th.selcol input{width:14px;height:14px;cursor:pointer;}
   transition:border-color .16s,box-shadow .16s;
 }
 .stage-card.active{background:#fff;border-color:var(--ink);box-shadow:var(--shadow);}
+.stage-card:hover:not(.active){border-color:var(--ink-soft);background:#fff;}
 .stage-card .stage-top{display:flex;align-items:center;gap:10px;}
 .stage-card .stage-chip{
   width:22px;height:22px;border-radius:999px;background:var(--paper-200);color:var(--ink-soft);
@@ -247,7 +255,7 @@ td.selcol input, th.selcol input{width:14px;height:14px;cursor:pointer;}
 .cust-list-foot{padding:12px 18px;font-size:12px;color:var(--ink-soft);display:flex;justify-content:space-between;}
 .cust-row{
   display:flex;align-items:center;gap:14px;padding:13px 18px;border-bottom:1px solid var(--paper-100);
-  cursor:pointer;border-left:3px solid transparent;
+  cursor:pointer;border-left:3px solid transparent;transition:background .12s,border-color .12s;
 }
 .cust-row:hover{background:var(--paper-50);}
 .cust-row.active{background:var(--paper-100);border-left-color:var(--ink);}
@@ -272,7 +280,9 @@ td.selcol input, th.selcol input{width:14px;height:14px;cursor:pointer;}
 .tray-row:hover{background:var(--paper-50);}
 .tray-foot{padding:13px 18px;border-top:1px solid var(--paper-100);background:var(--paper-50);display:flex;flex-direction:column;gap:9px;}
 .tray-total{display:flex;justify-content:space-between;}
-.tray-export-btn{border:1px solid var(--green-export);background:var(--green-export);color:#fff;padding:11px 14px;border-radius:12px;font-size:14px;font-weight:700;width:100%;}
+.tray-export-btn{border:1px solid var(--green-export);background:var(--green-export);color:#fff;padding:11px 14px;border-radius:12px;font-size:14px;font-weight:700;width:100%;transition:background .14s,box-shadow .14s,transform .1s;}
+.tray-export-btn:hover:not(:disabled){background:#186633;box-shadow:0 3px 10px rgba(31,122,61,.3);transform:translateY(-1px);}
+.tray-export-btn:active:not(:disabled){transform:translateY(0) scale(.97);box-shadow:none;}
 .tray-export-btn:disabled{background:#fff;color:var(--green-export);opacity:.5;cursor:not-allowed;}
 
 /* 三點選單 */
@@ -382,6 +392,8 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 .loading-overlay.open{display:flex;}
 .loading-overlay .ring{width:26px;height:26px;border-radius:50%;border:3px solid var(--paper-200);border-top-color:var(--leaf-600);animation:spin .8s linear infinite;}
 .loading-overlay span{font-size:13px;color:var(--ink-soft);}
+.loading-progress-wrap{width:220px;height:6px;border-radius:999px;background:var(--paper-200);overflow:hidden;}
+.loading-progress-bar{height:100%;width:0%;background:var(--leaf-600);border-radius:999px;transition:width .2s ease-out;}
 
 @media (max-width:640px){
   .map-grid{grid-template-columns:1fr;}
@@ -554,6 +566,10 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
         <label>備註</label>
         <input type="text" id="custNotes" placeholder="需要特別注意的事，會用紅字顯示在客戶名稱旁邊">
       </div>
+      <div class="field">
+        <label>報價單檔案位置</label>
+        <input type="text" id="custQuoteFileLocation" placeholder="例如 Z:\報價單\台灣善美的\ 或雲端連結，純粹方便記錄查找，不影響匯出">
+      </div>
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" data-close="ovCustomer">取消</button>
@@ -616,6 +632,7 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
       </div>
       <div id="batchQuotesProgressWrap" style="margin-top:14px;display:none;">
         <div class="hint" id="batchQuotesProgress"></div>
+        <div class="loading-progress-wrap" style="width:100%;margin-top:6px;"><div class="loading-progress-bar" id="batchQuotesProgressBar"></div></div>
       </div>
     </div>
     <div class="modal-foot">
@@ -814,9 +831,9 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
   </div>
 </div>
 
-<div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span></div>
+<div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span><div class="loading-progress-wrap" id="loadingProgressWrap" style="display:none;"><div class="loading-progress-bar" id="loadingProgressBar"></div></div></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-18-supabase-v15"></script>
+<script src="app.js?v=2026-09-19-supabase-v16"></script>
 </body>
 </html>
