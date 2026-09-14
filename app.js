@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-20-supabase-v17';
+const FRONTEND_VERSION = '2026-09-21-supabase-v18';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -455,14 +455,11 @@ function buildConvertedRecords(rawRowsList, dataStartRowIdx, columnMap, productC
       if (!rec[identityField]) continue;
       const priceWasZeroOrBlank = !rec['單價'] || !String(rec['單價']).trim() || String(rec['單價']).trim() === '0';
       if (!rec['單價'] || !String(rec['單價']).trim()) rec['單價'] = '0'; // 無單價自動補0
-      // 有貨號客戶：單價是 0 或空白時，若客戶自己沒填「不報價原因」，自動補「時價」；
-      // 反過來，只要有實際報價（單價不是 0），「不報價原因」一律清空，避免跟有報價的品項邏輯矛盾
-      if (!noCode) {
-        if (priceWasZeroOrBlank) {
-          if (!rec['不報價原因'] || !String(rec['不報價原因']).trim()) rec['不報價原因'] = '時價';
-        } else {
-          rec['不報價原因'] = '';
-        }
+      // 有貨號客戶：只要有實際報價（單價不是 0），「不報價原因」一律清空，避免跟有報價的品項邏輯矛盾；
+      // 沒報價時（單價是 0 或空白）不自動補任何文字，單價是 0 已經足以表示沒報價，
+      // 不報價原因維持客戶檔案裡原本寫的內容（沒填就是空白）
+      if (!noCode && !priceWasZeroOrBlank) {
+        rec['不報價原因'] = '';
       }
       if (noCode) {
         const matchedCode = lookupMap.get(rec['品名']);
