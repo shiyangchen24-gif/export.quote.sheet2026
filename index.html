@@ -404,6 +404,12 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
         <div class="search-box" style="width:240px;">
           <input type="text" id="searchInput" placeholder="搜尋客戶代號或名稱…">
         </div>
+        <select id="unitCategoryFilterSelect" class="raw-select" style="display:none;">
+          <option value="all">全部單位</option>
+          <option value="kg">kg</option>
+          <option value="台斤">台斤</option>
+          <option value="">未設定單位</option>
+        </select>
         <select id="cycleFilterSelect" class="raw-select">
           <option value="all">全部報價週期</option>
           <option value="7天">7天</option>
@@ -650,7 +656,7 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
       <button class="modal-close" data-close="ovLookup">✕</button>
     </div>
     <div class="modal-body">
-      <p class="hint" style="margin-bottom:8px;font-weight:600;color:var(--ink);">新增單筆對照</p>
+      <p class="hint" style="margin-bottom:8px;font-weight:600;color:var(--ink);" id="lookupFormLabel">新增單筆對照</p>
       <div class="field-row" style="align-items:flex-end;">
         <div class="field" style="margin-bottom:0;">
           <label>客戶品項名稱</label>
@@ -664,6 +670,7 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
           <label>忠欣品項名稱</label>
           <input type="text" id="newLookupItemName" placeholder="自動帶入" disabled>
         </div>
+        <button class="btn btn-ghost" id="btnCancelEditLookupEntry" style="flex-shrink:0;display:none;">取消</button>
         <button class="btn btn-secondary" id="btnAddLookupEntry" style="flex-shrink:0;">新增</button>
       </div>
       <datalist id="masterItemsDatalist"></datalist>
@@ -785,6 +792,6 @@ tr.unmatched-row td{background:#ffe6d1 !important;color:var(--orange-action) !im
 <div class="loading-overlay" id="loadingOverlay"><div class="ring"></div><span id="loadingText">處理中…</span><div class="loading-progress-wrap" id="loadingProgressWrap" style="display:none;"><div class="loading-progress-bar" id="loadingProgressBar"></div></div></div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script src="app.js?v=2026-09-23-supabase-v20"></script>
+<script src="app.js?v=2026-09-25-supabase-v22"></script>
 </body>
 </html>
