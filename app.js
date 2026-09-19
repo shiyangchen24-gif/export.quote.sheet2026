@@ -7,7 +7,7 @@
 // 資料的存取權限由 Supabase 那邊的 Row Level Security 規則控制，不是靠隱藏這把 key 來保護。
 const SUPABASE_URL = 'https://ovjdtzzvpafomivbuecb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92amR0enp2cGFmb21pdmJ1ZWNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTMyODUsImV4cCI6MjEwNDQyOTI4NX0.gJleE2ca_bPoKgAJsJqb6sn5RVBczIxHUxImxStjWDE';
-const FRONTEND_VERSION = '2026-09-23-supabase-v20';
+const FRONTEND_VERSION = '2026-09-25-supabase-v22';
 
 // 驗證是不是一個「看起來像樣」的 Supabase URL：https 開頭、能被解析成正常網址、
 // 且不是還沒填的預設值。單純檢查字串開頭不是預設文字是不夠的——像是貼到多餘的空白、
@@ -107,6 +107,7 @@ let state = {
   activeTab: 'hasCode', // hasCode | noCode
   stageFilter: 'ready', // setup | pending | ready — 取代原本的統計卡篩選
   cycleFilter: 'all', // all | 7天 | 10天 | 15天 | 30天
+  unitCategoryFilter: 'all', // all | kg | 台斤 | '' — 只有無貨號頁籤會用到，因為報價單位不同，匯出時不能混在一起
   search: '',
   activeDetailCode: null, // 目前在右側詳情面板顯示的客戶代號
   masterItems: [], // {itemCode, itemName, unit}[] — 全公司共用，切到「無貨號客戶」頁籤時載入
@@ -791,10 +792,15 @@ function filteredCustomers() {
   const wantMode = state.activeTab === 'noCode' ? '無貨號' : '有貨號';
   return state.customers.filter(c => {
     if (c.productCodeMode !== wantMode) return false;
-    if (state.stageFilter === 'needsLookup') {
-      if (c.itemCodeLookupCount > 0) return false;
-    } else if (computeStage(c) !== state.stageFilter) return false;
+    // 有輸入搜尋關鍵字時，讓使用者能跨「階段」直接找到客戶，不受目前選的階段卡片限制；
+    // 沒有關鍵字時才照常套用階段篩選
+    if (!kw) {
+      if (state.stageFilter === 'needsLookup') {
+        if (c.itemCodeLookupCount > 0) return false;
+      } else if (computeStage(c) !== state.stageFilter) return false;
+    }
     if (state.cycleFilter !== 'all' && c.quoteCycle !== state.cycleFilter) return false;
+    if (state.unitCategoryFilter && state.unitCategoryFilter !== 'all' && (c.unitCategory || '') !== state.unitCategoryFilter) return false;
     if (kw && !(String(c.code).toLowerCase().includes(kw) || String(c.name).toLowerCase().includes(kw))) return false;
     return true;
   });
@@ -822,8 +828,8 @@ function renderCustomerList() {
     ready: '已解析並暫存品項，勾選後合併成一份匯入檔',
     needsLookup: '這些客戶還沒建立「客戶品名 → 忠欣料號」對照表，上傳報價單時會全部比對不到料號'
   };
-  document.getElementById('listTitle').textContent = titles[state.stageFilter];
-  document.getElementById('listHint').textContent = hints[state.stageFilter];
+  document.getElementById('listTitle').textContent = state.search.trim() ? '🔍 搜尋結果' : titles[state.stageFilter];
+  document.getElementById('listHint').textContent = state.search.trim() ? '跨所有階段搜尋，不受目前選的階段卡片限制' : hints[state.stageFilter];
 
   const readyInTab = allInTab.filter(c => computeStage(c) === 'ready');
   const allChecked = readyInTab.length > 0 && readyInTab.every(c => state.selectedCodes.has(c.code));
@@ -866,7 +872,10 @@ function renderCustomerList() {
       </div>`;
     }).join('');
   }
-  foot.innerHTML = `<span>顯示 ${list.length} / ${allInTab.filter(c => state.stageFilter === 'needsLookup' ? !(c.itemCodeLookupCount > 0) : computeStage(c) === state.stageFilter).length} 家（共 ${totalInTab} 家${wantMode}客戶）</span><span class="mono">前端版本 ${FRONTEND_VERSION}</span>`;
+  const stageTotal = state.search.trim()
+    ? totalInTab
+    : allInTab.filter(c => state.stageFilter === 'needsLookup' ? !(c.itemCodeLookupCount > 0) : computeStage(c) === state.stageFilter).length;
+  foot.innerHTML = `<span>顯示 ${list.length} / ${stageTotal} 家（共 ${totalInTab} 家${wantMode}客戶）</span><span class="mono">前端版本 ${FRONTEND_VERSION}</span>`;
   syncSelectAllCheckbox();
 }
 
@@ -989,9 +998,12 @@ document.getElementById('tabRow').addEventListener('click', e => {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
   document.getElementById('masterItemsPanel').style.display = tab === 'noCode' ? 'flex' : 'none';
   document.getElementById('btnMasterItemsTop').style.display = tab === 'noCode' ? 'inline-flex' : 'none';
+  document.getElementById('unitCategoryFilterSelect').style.display = tab === 'noCode' ? 'inline-block' : 'none';
   // 階段篩選跟頁籤內選取都是「頁籤內」的概念，切頁籤時重置，避免帶著上個頁籤的篩選條件卻找不到東西
   state.stageFilter = 'ready';
   state.cycleFilter = 'all';
+  state.unitCategoryFilter = 'all';
+  document.getElementById('unitCategoryFilterSelect').value = 'all';
   state.selectedCodes.clear();
   state.activeDetailCode = null;
   renderStageCards();
@@ -1114,6 +1126,11 @@ document.getElementById('cycleFilterSelect').addEventListener('change', e => {
   renderCustomerList();
 });
 
+document.getElementById('unitCategoryFilterSelect').addEventListener('change', e => {
+  state.unitCategoryFilter = e.target.value;
+  renderCustomerList();
+});
+
 document.getElementById('btnMasterItemsTop').addEventListener('click', () => {
   document.getElementById('btnMasterItems').click();
 });
@@ -1227,6 +1244,15 @@ document.getElementById('btnBatchExport').addEventListener('click', async () => 
   const notReady = selectedCustomers.filter(c => !(c[countField] > 0));
   if (!ready.length) { toast('err', '選取的客戶都還沒有「上傳報價單」儲存過資料，沒有東西可以匯出'); return; }
   if (notReady.length && !confirm(`選取的 ${selectedCustomers.length} 筆客戶中，有 ${notReady.length} 筆還沒上傳過報價單（${notReady.map(c => c.code).join('、')}），會被跳過不列入這次匯出。要繼續嗎？`)) return;
+  // 無貨號客戶的報價單位（kg／台斤）不一樣時，混在同一份合併檔案裡數字會誤導人，所以擋下來、
+  // 請使用者分開匯出；只有 kg 跟台斤兩者都出現才算衝突，未設定單位的客戶不強制擋
+  if (noCode) {
+    const cats = new Set(ready.map(c => c.unitCategory).filter(v => v === 'kg' || v === '台斤'));
+    if (cats.size > 1) {
+      toast('err', `選取的客戶裡同時有 kg 跟台斤兩種單位（${ready.filter(c => c.unitCategory === 'kg' || c.unitCategory === '台斤').map(c => `${c.code}:${c.unitCategory}`).join('、')}），報價單位不同不能合併匯出，請用上方「單位」篩選分開匯出`);
+      return;
+    }
+  }
 
   setLoading(true, '準備匯出元件…');
   try {
@@ -1360,39 +1386,56 @@ function openHistoryModal(customer) {
 
 /* ---------------- 忠欣品項主檔：上傳/更新 ---------------- */
 let masterItemsParsed = [];
-document.getElementById('btnMasterItems').addEventListener('click', () => {
+document.getElementById('btnMasterItems').addEventListener('click', async () => {
   ensureXLSX();
   masterItemsParsed = [];
   document.getElementById('masterItemsPreviewWrap').style.display = 'none';
   document.getElementById('masterItemsFileInput').value = '';
   document.getElementById('btnConfirmMasterItems').disabled = true;
   openModal('ovMasterItems');
+  // 確保目前的主檔資料已經載入，之後上傳沒有「規格代號」欄位的檔案時才能正確沿用舊值，不會被空白蓋掉
+  if (!state.masterItems.length) { setLoading(true, '載入目前的忠欣品項主檔…'); await loadMasterItems(); setLoading(false); }
 });
 setupDropzone('masterItemsDropzone', 'masterItemsFileInput', async file => {
   try {
     const { rows } = await readWorkbookRaw(file);
     if (!rows.length) { toast('err', '檔案沒有資料'); return; }
-    const headerRow = rows[0].map(h => String(h || '').trim());
-    const codeIdx = headerRow.findIndex(h => /品項代號|料號|品號|產品編號/.test(h));
-    const nameIdx = headerRow.findIndex(h => /品項名稱|品名|名稱/.test(h));
+    // 標題列不一定在第一列（例如直接拿「多客戶報價單格式」匯出檔當來源，標題其實在第3列），
+    // 掃描前20列找出真正符合「品項代號＋品項名稱」的那一列，找不到才退回用第一列
+    const idPattern = /品項代號|料號|品號|產品編號/;
+    const namePattern = /品項名稱|品名|名稱/;
+    let headerRowIdx = 0;
+    for (let i = 0; i < Math.min(20, rows.length); i++) {
+      const line = (rows[i] || []).map(h => String(h || '').trim());
+      if (line.some(h => idPattern.test(h)) && line.some(h => namePattern.test(h))) { headerRowIdx = i; break; }
+    }
+    const headerRow = rows[headerRowIdx].map(h => String(h || '').trim());
+    const codeIdx = headerRow.findIndex(h => idPattern.test(h));
+    const nameIdx = headerRow.findIndex(h => namePattern.test(h));
     const specCodeIdx = headerRow.findIndex(h => /規格代號/.test(h));
     const unitIdx = headerRow.findIndex((h, idx) => idx !== specCodeIdx && /規格|單位/.test(h));
     const gradeIdx = headerRow.findIndex(h => /等級/.test(h));
-    if (codeIdx === -1 || nameIdx === -1) { toast('err', '找不到「品項代號」或「品項名稱」欄位，請確認第一列是標題列'); return; }
+    if (codeIdx === -1 || nameIdx === -1) { toast('err', '找不到「品項代號」或「品項名稱」欄位，請確認檔案裡有標題列'); return; }
+    // 檔案完全沒有「規格代號」欄位時（例如只是要更新名稱/單位的簡化版清單），不能整欄蓋成空白，
+    // 那樣會把先前手動填好的規格代號全部洗掉；改成先讀出資料庫現有的值，比對到的品項沿用舊值
+    let existingSpecCodeMap = new Map();
+    if (specCodeIdx === -1 && state.masterItems.length) {
+      existingSpecCodeMap = new Map(state.masterItems.map(m => [m.itemCode, m.specCode || '']));
+    }
     masterItemsParsed = [];
-    for (let i = 1; i < rows.length; i++) {
+    for (let i = headerRowIdx + 1; i < rows.length; i++) {
       const itemCode = String(rows[i][codeIdx] || '').trim();
       if (!itemCode) continue;
       masterItemsParsed.push({
         itemCode,
         itemName: String(rows[i][nameIdx] || '').trim(),
         unit: unitIdx > -1 ? String(rows[i][unitIdx] || '').trim() : '',
-        specCode: specCodeIdx > -1 ? String(rows[i][specCodeIdx] || '').trim() : '',
+        specCode: specCodeIdx > -1 ? String(rows[i][specCodeIdx] || '').trim() : (existingSpecCodeMap.get(itemCode) || ''),
         grade: gradeIdx > -1 ? String(rows[i][gradeIdx] || '').trim() : ''
       });
     }
     document.getElementById('masterItemsSummary').textContent = `辨識到 ${masterItemsParsed.length} 筆品項，確認後會整份取代目前的忠欣品項主檔` +
-      (specCodeIdx === -1 ? '（沒有找到「規格代號」欄位，這欄留空）' : '');
+      (specCodeIdx === -1 ? '（這份檔案沒有「規格代號」欄位，比對得到的品項會沿用資料庫現有的規格代號，比對不到的才會留空）' : '');
     const table = document.getElementById('masterItemsPreviewTable');
     table.innerHTML = '<thead><tr><th>品項代號</th><th>品項名稱</th><th>規格代號</th><th>規格</th><th>等級</th></tr></thead><tbody>' +
       masterItemsParsed.slice(0, 200).map(m => `<tr><td class="mono">${escapeHtml(m.itemCode)}</td><td>${escapeHtml(m.itemName)}</td><td class="mono">${escapeHtml(m.specCode)}</td><td>${escapeHtml(m.unit)}</td><td>${escapeHtml(m.grade)}</td></tr>`).join('') +
@@ -1416,6 +1459,7 @@ document.getElementById('btnConfirmMasterItems').addEventListener('click', async
 let lookupParsed = [];
 let lookupTargetCustomer = null;
 let lookupExistingEntries = [];
+let editingLookupOriginalName = null; // 正在編輯哪一筆既有對照（用原本的客戶品項名稱識別），null 代表現在是「新增」模式
 
 function populateMasterItemsDatalist() {
   const dl = document.getElementById('masterItemsDatalist');
@@ -1430,10 +1474,56 @@ function renderLookupExistingTable() {
     table.innerHTML = '<tbody><tr><td class="hint" style="padding:10px;">還沒有任何對照，請用上面的表單新增，或用下面整批上傳</td></tr></tbody>';
     return;
   }
-  table.innerHTML = '<thead><tr><th>客戶品項名稱</th><th>忠欣品項名稱</th><th>忠欣料號</th></tr></thead><tbody>' +
-    lookupExistingEntries.map(x => `<tr><td>${escapeHtml(x.name)}</td><td>${escapeHtml(x.itemName || '')}</td><td class="mono">${escapeHtml(x.code)}</td></tr>`).join('') +
+  table.innerHTML = '<thead><tr><th>客戶品項名稱</th><th>忠欣品項名稱</th><th>忠欣料號</th><th></th></tr></thead><tbody>' +
+    lookupExistingEntries.map(x => `<tr>
+      <td>${escapeHtml(x.name)}</td>
+      <td>${escapeHtml(x.itemName || '')}</td>
+      <td class="mono">${escapeHtml(x.code)}</td>
+      <td style="white-space:nowrap;">
+        <button class="text-link" data-act="editlookup" data-name="${escapeHtml(x.name)}">編輯</button>
+        <button class="text-link danger" data-act="deletelookup" data-name="${escapeHtml(x.name)}">刪除</button>
+      </td>
+    </tr>`).join('') +
     '</tbody>';
 }
+
+function setLookupEditMode(entry) {
+  editingLookupOriginalName = entry ? entry.name : null;
+  document.getElementById('lookupFormLabel').textContent = entry ? `編輯對照－ ${entry.name}` : '新增單筆對照';
+  document.getElementById('newLookupCustName').value = entry ? entry.name : '';
+  document.getElementById('newLookupItemCode').value = entry ? entry.code : '';
+  document.getElementById('newLookupItemName').value = entry ? (entry.itemName || '') : '';
+  document.getElementById('btnAddLookupEntry').textContent = entry ? '儲存修改' : '新增';
+  document.getElementById('btnCancelEditLookupEntry').style.display = entry ? 'inline-flex' : 'none';
+}
+
+document.getElementById('lookupExistingTable').addEventListener('click', async e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn || !lookupTargetCustomer) return;
+  const name = btn.getAttribute('data-name');
+  const entry = lookupExistingEntries.find(x => x.name === name);
+  if (!entry) return;
+  const act = btn.getAttribute('data-act');
+  if (act === 'editlookup') {
+    setLookupEditMode(entry);
+    document.getElementById('newLookupCustName').focus();
+  } else if (act === 'deletelookup') {
+    if (!confirm(`確定要刪除「${name}」這筆對照嗎？`)) return;
+    setLoading(true, '刪除對照中…');
+    try {
+      lookupExistingEntries = lookupExistingEntries.filter(x => x.name !== name);
+      const customer = await saveItemCodeLookup(lookupTargetCustomer.code, lookupExistingEntries);
+      upsertCustomer(customer);
+      lookupTargetCustomer = customer;
+      renderLookupExistingTable();
+      if (editingLookupOriginalName === name) setLookupEditMode(null);
+      toast('ok', `已刪除「${name}」`);
+    } catch (err) { toast('err', err.message); }
+    finally { setLoading(false); }
+  }
+});
+
+document.getElementById('btnCancelEditLookupEntry').addEventListener('click', () => setLookupEditMode(null));
 
 async function openLookupWizard(customer) {
   lookupTargetCustomer = customer;
@@ -1442,9 +1532,7 @@ async function openLookupWizard(customer) {
   document.getElementById('lookupPreviewWrap').style.display = 'none';
   document.getElementById('lookupFileInput').value = '';
   document.getElementById('btnConfirmLookup').disabled = true;
-  document.getElementById('newLookupCustName').value = '';
-  document.getElementById('newLookupItemCode').value = '';
-  document.getElementById('newLookupItemName').value = '';
+  setLookupEditMode(null);
   ensureXLSX();
   openModal('ovLookup');
   setLoading(true, '載入現有對照與忠欣品項主檔…');
@@ -1472,21 +1560,25 @@ document.getElementById('btnAddLookupEntry').addEventListener('click', async () 
   const match = state.masterItems.find(m => m.itemCode === code);
   if (!name) { toast('err', '請輸入客戶品項名稱'); return; }
   if (!code || !match) { toast('err', '忠欣料號找不到對應的品項，請確認輸入或從清單選擇'); return; }
-  setLoading(true, '新增對照中…');
+  setLoading(true, editingLookupOriginalName ? '儲存修改中…' : '新增對照中…');
   try {
+    const entry = { name, code, itemName: match.itemName };
+    // 編輯模式下，如果客戶品項名稱被改掉了，要先把原本那筆（用舊名稱找）移除，
+    // 不然會變成留著一筆舊名稱的沒用到，另外多一筆新名稱的，等於複製了一筆而不是修改
+    if (editingLookupOriginalName && editingLookupOriginalName !== name) {
+      lookupExistingEntries = lookupExistingEntries.filter(x => x.name !== editingLookupOriginalName);
+    }
     // 用「客戶品項名稱」當key：已存在就更新，否則新增一筆，不會動到其他既有對照
     const idx = lookupExistingEntries.findIndex(x => x.name === name);
-    const entry = { name, code, itemName: match.itemName };
     if (idx > -1) lookupExistingEntries[idx] = entry;
     else lookupExistingEntries.push(entry);
     const customer = await saveItemCodeLookup(lookupTargetCustomer.code, lookupExistingEntries);
     upsertCustomer(customer);
     lookupTargetCustomer = customer;
     renderLookupExistingTable();
-    document.getElementById('newLookupCustName').value = '';
-    document.getElementById('newLookupItemCode').value = '';
-    document.getElementById('newLookupItemName').value = '';
-    toast('ok', `已新增「${name}」對照到 ${match.itemCode}`);
+    const wasEditing = !!editingLookupOriginalName;
+    setLookupEditMode(null);
+    toast('ok', wasEditing ? `已更新「${name}」對照到 ${match.itemCode}` : `已新增「${name}」對照到 ${match.itemCode}`);
   } catch (err) { toast('err', err.message); }
   finally { setLoading(false); }
 });
